@@ -2,7 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
+use App\Models\Admin;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
@@ -14,11 +14,10 @@ class AdminUserSeeder extends Seeder
     public function run(): void
     {
         // Check if admin user already exists
-        $adminExists = User::where('email', 'admin@sawarisadhan.com')->exists();
+        $adminExists = Admin::where('email', 'admin@sawarisadhan.com')->exists();
 
         if (!$adminExists) {
-            User::create([
-                'unique_id' => 'SS-ADMIN-' . strtoupper(uniqid()),
+            Admin::create([
                 'name' => 'Admin User',
                 'email' => 'admin@sawarisadhan.com',
                 'password' => Hash::make('admin123'),
@@ -33,4 +32,3 @@ class AdminUserSeeder extends Seeder
         }
     }
 }
-

@@ -30,4 +30,39 @@ class Vendor extends Authenticatable
             'password' => 'hashed',
         ];
     }
+
+    /**
+     * Get the vendor's profile.
+     */
+    public function profile()
+    {
+        return $this->hasOne(VendorProfile::class);
+    }
+
+    /**
+     * Get the vendor's availability schedules.
+     */
+    public function availabilities()
+    {
+        return $this->hasMany(VendorAvailability::class);
+    }
+
+    /**
+     * Get availability for a specific day.
+     */
+    public function getAvailabilityForDay($day)
+    {
+        return $this->availabilities()->where('day_of_week', strtolower($day))->first();
+    }
+
+    /**
+     * Check if vendor is available today.
+     */
+    public function isAvailableToday()
+    {
+        $today = strtolower(now()->format('l'));
+        $availability = $this->getAvailabilityForDay($today);
+
+        return $availability && $availability->isAvailableAt();
+    }
 }

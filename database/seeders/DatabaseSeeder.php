@@ -18,6 +18,8 @@ class DatabaseSeeder extends Seeder
         // Create admin user for Filament panel
         $this->call([
             AdminUserSeeder::class,
+            DummyUsersSeeder::class,
+            DummyVendorsSeeder::class,
         ]);
 
         // User::factory(10)->create();
