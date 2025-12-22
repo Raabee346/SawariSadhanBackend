@@ -105,7 +105,7 @@ class AuthController extends Controller
 
         $otp->delete();
 
-        // Create token if using Sanctum
+        // Create token using Sanctum
         $token = $entity->createToken($type . '-token')->plainTextToken;
 
         return response()->json([
@@ -156,7 +156,7 @@ class AuthController extends Controller
     // POST /api/logout
     public function logout(Request $request)
     {
-        $user = $request->user(); // works for both user & vendor if using Sanctum
+        $user = $request->user(); // works for both user & vendor using Sanctum
 
         if ($user) {
             $user->currentAccessToken()->delete();

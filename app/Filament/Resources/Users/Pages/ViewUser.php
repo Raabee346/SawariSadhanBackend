@@ -7,6 +7,8 @@ use Filament\Actions\EditAction;
 use Filament\Forms\Components\Placeholder;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\HtmlString;
 
 class ViewUser extends ViewRecord
 {
@@ -56,6 +58,37 @@ class ViewUser extends ViewRecord
                 Placeholder::make('heading_profile')
                     ->label('PROFILE INFORMATION')
                     ->content('')
+                    ->visible(fn ($record) => $record->profile !== null)
+                    ->columnSpanFull(),
+                
+                Placeholder::make('profile.profile_picture')
+                    ->label('📷 Profile Picture')
+                    ->content(function ($record) {
+                        if (!$record->profile || !$record->profile->profile_picture) {
+                            return new HtmlString('<div style="text-align: center; padding: 10px; background: #f3f4f6; border-radius: 8px; display: inline-block; max-width: 200px;">
+                                <svg style="width: 50px; height: 50px; margin: 0 auto; color: #9ca3af;" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
+                                </svg>
+                                <p style="color: #6b7280; margin-top: 5px; font-size: 12px;">No profile picture uploaded</p>
+                            </div>');
+                        }
+                        
+                        // Check if file exists
+                        if (!Storage::disk('public')->exists($record->profile->profile_picture)) {
+                            return new HtmlString('<div style="text-align: center; padding: 10px; background: #f3f4f6; border-radius: 8px; display: inline-block; max-width: 200px;">
+                                <svg style="width: 50px; height: 50px; margin: 0 auto; color: #9ca3af;" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
+                                </svg>
+                                <p style="color: #6b7280; margin-top: 5px; font-size: 12px;">Profile picture file not found</p>
+                            </div>');
+                        }
+                        
+                        $imageUrl = asset('storage/' . $record->profile->profile_picture);
+                        return new HtmlString('<div style="text-align: center;">
+                            <img src="' . htmlspecialchars($imageUrl, ENT_QUOTES, 'UTF-8') . '" alt="Profile Picture" style="max-width: 300px; max-height: 300px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); object-fit: cover;" onerror="this.onerror=null; this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMzAwIiB2aWV3Qm94PSIwIDAgMTAwIDEwMCI+PHJlY3Qgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiIGZpbGw9IiNlNWU3ZWIiLz48cGF0aCBmaWxsPSIjOWNhM2FmIiBkPSJNNTAgNDVhMTIgMTIgMCAxIDAgMC0yNCAxMiAxMiAwIDAgMCAwIDI0em0wIDVjLTEzLjggMC0yNSA4LjQtMjUgMTkuMmg1MEM3NSA1OC40IDYzLjggNTAgNTAgNTB6Ii8+PC9zdmc+\';">
+                            <p style="margin-top: 10px; color: #6b7280; font-size: 12px;">Uploaded: ' . htmlspecialchars($record->profile->updated_at->format('Y-m-d H:i'), ENT_QUOTES, 'UTF-8') . '</p>
+                        </div>');
+                    })
                     ->visible(fn ($record) => $record->profile !== null)
                     ->columnSpanFull(),
                 

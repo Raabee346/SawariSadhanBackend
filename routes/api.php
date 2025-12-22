@@ -18,7 +18,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/profile/password', [AuthController::class, 'updatePassword']);
     
     // User Profile Routes
-    Route::prefix('user')->group(function () {
+    Route::prefix('user')->middleware('customer')->group(function () {
         Route::get('/profile', [UserProfileController::class, 'show']);
         Route::post('/profile', [UserProfileController::class, 'updateOrCreate']);
         Route::post('/profile/picture', [UserProfileController::class, 'updateProfilePicture']);
@@ -26,10 +26,11 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Vendor Profile Routes
-    Route::prefix('vendor')->group(function () {
+    Route::prefix('vendor')->middleware('vendor')->group(function () {
         Route::get('/profile', [VendorProfileController::class, 'show']);
         Route::post('/profile', [VendorProfileController::class, 'updateOrCreate']);
         Route::post('/profile/document', [VendorProfileController::class, 'uploadDocument']);
+        Route::post('/profile/documents', [VendorProfileController::class, 'uploadMultipleDocuments']);
         Route::post('/profile/service-area', [VendorProfileController::class, 'updateServiceArea']);
         
         // Availability Routes
