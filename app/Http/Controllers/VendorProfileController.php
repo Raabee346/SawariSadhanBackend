@@ -64,7 +64,7 @@ class VendorProfileController extends Controller
         }
 
         $vendor = $request->user();
-        $data = $request->except(['profile_picture', 'license_document', 'vehicle_rc_document', 'insurance_document', 'aadhar_document', 'pan_document']);
+        $data = $request->except(['profile_picture', 'license_document', 'vehicle_rc_document', 'insurance_document', 'citizenship_document', 'pan_document']);
 
         // Handle profile picture upload
         if ($request->hasFile('profile_picture')) {
@@ -105,8 +105,8 @@ class VendorProfileController extends Controller
         $documentField = $documentType . '_document';
 
         $path = $this->uploadFile(
-            $request->file('document'), 
-            'documents/vendors', 
+            $request->file('document'),
+            'documents/vendors',
             'vendor_' . $vendor->id . '_' . $documentType
         );
 

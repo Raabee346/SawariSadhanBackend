@@ -7,6 +7,8 @@ use Filament\Actions\EditAction;
 use Filament\Forms\Components\Placeholder;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\HtmlString;
 
 class ViewVendor extends ViewRecord
 {
@@ -56,6 +58,37 @@ class ViewVendor extends ViewRecord
                 Placeholder::make('heading_personal')
                     ->label('PERSONAL DETAILS')
                     ->content('')
+                    ->visible(fn ($record) => $record->profile !== null)
+                    ->columnSpanFull(),
+                
+                Placeholder::make('profile.profile_picture')
+                    ->label('📷 Profile Picture')
+                    ->content(function ($record) {
+                        if (!$record->profile || !$record->profile->profile_picture) {
+                            return new HtmlString('<div style="text-align: center; padding: 10px; background: #f3f4f6; border-radius: 8px; display: inline-block; max-width: 200px;">
+                                <svg style="width: 50px; height: 50px; margin: 0 auto; color: #9ca3af;" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
+                                </svg>
+                                <p style="color: #6b7280; margin-top: 5px; font-size: 12px;">No profile picture uploaded</p>
+                            </div>');
+                        }
+                        
+                        // Check if file exists
+                        if (!Storage::disk('public')->exists($record->profile->profile_picture)) {
+                            return new HtmlString('<div style="text-align: center; padding: 10px; background: #f3f4f6; border-radius: 8px; display: inline-block; max-width: 200px;">
+                                <svg style="width: 50px; height: 50px; margin: 0 auto; color: #9ca3af;" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
+                                </svg>
+                                <p style="color: #6b7280; margin-top: 5px; font-size: 12px;">Profile picture file not found</p>
+                            </div>');
+                        }
+                        
+                        $imageUrl = asset('storage/' . $record->profile->profile_picture);
+                        return new HtmlString('<div style="text-align: center;">
+                            <img src="' . htmlspecialchars($imageUrl, ENT_QUOTES, 'UTF-8') . '" alt="Profile Picture" style="max-width: 300px; max-height: 300px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); object-fit: cover;" onerror="this.onerror=null; this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMzAwIiB2aWV3Qm94PSIwIDAgMTAwIDEwMCI+PHJlY3Qgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiIGZpbGw9IiNlNWU3ZWIiLz48cGF0aCBmaWxsPSIjOWNhM2FmIiBkPSJNNTAgNDVhMTIgMTIgMCAxIDAgMC0yNCAxMiAxMiAwIDAgMCAwIDI0em0wIDVjLTEzLjggMC0yNSA4LjQtMjUgMTkuMmg1MEM3NSA1OC40IDYzLjggNTAgNTAgNTB6Ii8+PC9zdmc+\';">
+                            <p style="margin-top: 10px; color: #6b7280; font-size: 12px;">Uploaded: ' . htmlspecialchars($record->profile->updated_at->format('Y-m-d H:i'), ENT_QUOTES, 'UTF-8') . '</p>
+                        </div>');
+                    })
                     ->visible(fn ($record) => $record->profile !== null)
                     ->columnSpanFull(),
                 
@@ -141,30 +174,67 @@ class ViewVendor extends ViewRecord
                     ->content(fn ($record) => $record->profile?->license_expiry ? $record->profile->license_expiry->format('Y-m-d') . ($record->profile->license_expiry->isFuture() ? ' ✅' : ' ⚠️ EXPIRED') : 'Not Provided')
                     ->visible(fn ($record) => $record->profile !== null),
                 
-                Placeholder::make('profile.license_document')
-                    ->label('📄 License Document')
-                    ->content(fn ($record) => $record->profile?->license_document ? '✅ Uploaded' : '❌ Not Uploaded')
-                    ->visible(fn ($record) => $record->profile !== null),
-                
-                Placeholder::make('profile.vehicle_rc_document')
-                    ->label('📄 Vehicle RC Document')
-                    ->content(fn ($record) => $record->profile?->vehicle_rc_document ? '✅ Uploaded' : '❌ Not Uploaded')
-                    ->visible(fn ($record) => $record->profile !== null),
-                
-                Placeholder::make('profile.insurance_document')
-                    ->label('📄 Insurance Document')
-                    ->content(fn ($record) => $record->profile?->insurance_document ? '✅ Uploaded' : '❌ Not Uploaded')
-                    ->visible(fn ($record) => $record->profile !== null),
-                
-                Placeholder::make('profile.citizenship_document')
-                    ->label('📄 Citizenship Document')
-                    ->content(fn ($record) => $record->profile?->citizenship_document ? '✅ Uploaded' : '❌ Not Uploaded')
-                    ->visible(fn ($record) => $record->profile !== null),
-                
-                Placeholder::make('profile.pan_document')
-                    ->label('📄 PAN Document')
-                    ->content(fn ($record) => $record->profile?->pan_document ? '✅ Uploaded' : '❌ Not Uploaded')
-                    ->visible(fn ($record) => $record->profile !== null),
+                Placeholder::make('all_documents')
+                    ->label('📄 Uploaded Documents')
+                    ->content(function ($record) {
+                        if (!$record->profile) {
+                            return 'No profile found';
+                        }
+                        
+                        $documents = [
+                            'License Document' => $record->profile->license_document,
+                            'Vehicle RC Document' => $record->profile->vehicle_rc_document,
+                            'Insurance Document' => $record->profile->insurance_document,
+                            'Citizenship Document' => $record->profile->citizenship_document,
+                            'PAN Document' => $record->profile->pan_document,
+                        ];
+                        
+                        $html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-top: 15px;">';
+                        
+                        foreach ($documents as $label => $path) {
+                            if ($path) {
+                                $fileUrl = asset('storage/' . $path);
+                                $extension = pathinfo($path, PATHINFO_EXTENSION);
+                                
+                                if (in_array(strtolower($extension), ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+                                    // Display image
+                                    $html .= '<div style="border: 2px solid #e5e7eb; border-radius: 8px; padding: 10px; background: white;">';
+                                    $html .= '<h4 style="margin: 0 0 10px 0; font-size: 14px; color: #374151;">' . $label . '</h4>';
+                                    $html .= '<a href="' . $fileUrl . '" target="_blank">';
+                                    $html .= '<img src="' . $fileUrl . '" alt="' . $label . '" style="width: 100%; height: 200px; object-fit: cover; border-radius: 6px; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform=\'scale(1.05)\'" onmouseout="this.style.transform=\'scale(1)\'">';
+                                    $html .= '</a>';
+                                    $html .= '<div style="margin-top: 8px; text-align: center;">';
+                                    $html .= '<a href="' . $fileUrl . '" target="_blank" style="color: #3b82f6; text-decoration: none; font-size: 12px;">🔍 View Full Size</a>';
+                                    $html .= '</div>';
+                                    $html .= '</div>';
+                                } else {
+                                    // Display PDF or other file
+                                    $html .= '<div style="border: 2px solid #e5e7eb; border-radius: 8px; padding: 20px; background: white; text-align: center;">';
+                                    $html .= '<h4 style="margin: 0 0 15px 0; font-size: 14px; color: #374151;">' . $label . '</h4>';
+                                    $html .= '<svg style="width: 80px; height: 80px; color: #ef4444; margin: 0 auto;" fill="currentColor" viewBox="0 0 20 20">';
+                                    $html .= '<path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/>';
+                                    $html .= '</svg>';
+                                    $html .= '<p style="margin: 10px 0; color: #6b7280; font-size: 12px; text-transform: uppercase;">' . strtoupper($extension) . ' File</p>';
+                                    $html .= '<a href="' . $fileUrl . '" target="_blank" style="display: inline-block; margin-top: 10px; padding: 8px 16px; background: #3b82f6; color: white; text-decoration: none; border-radius: 6px; font-size: 13px;">📥 Download / View</a>';
+                                    $html .= '</div>';
+                                }
+                            } else {
+                                // Document not uploaded
+                                $html .= '<div style="border: 2px dashed #d1d5db; border-radius: 8px; padding: 20px; background: #f9fafb; text-align: center;">';
+                                $html .= '<h4 style="margin: 0 0 10px 0; font-size: 14px; color: #9ca3af;">' . $label . '</h4>';
+                                $html .= '<svg style="width: 60px; height: 60px; color: #d1d5db; margin: 0 auto;" fill="currentColor" viewBox="0 0 20 20">';
+                                $html .= '<path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/>';
+                                $html .= '</svg>';
+                                $html .= '<p style="margin-top: 10px; color: #9ca3af; font-size: 12px;">Not Uploaded</p>';
+                                $html .= '</div>';
+                            }
+                        }
+                        
+                        $html .= '</div>';
+                        return new \Illuminate\Support\HtmlString($html);
+                    })
+                    ->visible(fn ($record) => $record->profile !== null)
+                    ->columnSpanFull(),
                 
                 Placeholder::make('heading_service')
                     ->label('SERVICE AREA')
