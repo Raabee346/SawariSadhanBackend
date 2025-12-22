@@ -173,25 +173,51 @@ class ViewUser extends ViewRecord
                         
                         <script>
                             (function() {
-                                if (document.getElementById("' . $mapId . '")._leaflet_id) {
-                                    return;
+                                function initUserMap() {
+                                    var mapElement = document.getElementById("' . $mapId . '");
+                                    if (!mapElement) {
+                                        setTimeout(initUserMap, 100);
+                                        return;
+                                    }
+                                    
+                                    if (mapElement._leaflet_id) {
+                                        return;
+                                    }
+                                    
+                                    if (typeof L === "undefined") {
+                                        setTimeout(initUserMap, 100);
+                                        return;
+                                    }
+                                    
+                                    try {
+                                        var map = L.map("' . $mapId . '").setView([' . $lat . ', ' . $lng . '], 14);
+                                        
+                                        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                                            attribution: \'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors\',
+                                            maxZoom: 19
+                                        }).addTo(map);
+                                        
+                                        var marker = L.marker([' . $lat . ', ' . $lng . ']).addTo(map)
+                                            .bindPopup("<b>' . htmlspecialchars($record->name, ENT_QUOTES, 'UTF-8') . '</b><br>' . htmlspecialchars($record->profile->address ?? 'User Location', ENT_QUOTES, 'UTF-8') . '")
+                                            .openPopup();
+                                    } catch (e) {
+                                        console.error("User map error:", e);
+                                        setTimeout(initUserMap, 200);
+                                    }
                                 }
                                 
-                                var map = L.map("' . $mapId . '").setView([' . $lat . ', ' . $lng . '], 14);
-                                
-                                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-                                    attribution: \'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors\',
-                                    maxZoom: 19
-                                }).addTo(map);
-                                
-                                var marker = L.marker([' . $lat . ', ' . $lng . ']).addTo(map)
-                                    .bindPopup("<b>' . htmlspecialchars($record->name, ENT_QUOTES) . '</b><br>' . htmlspecialchars($record->profile->address ?? 'User Location', ENT_QUOTES) . '")
-                                    .openPopup();
+                                if (document.readyState === "complete" || document.readyState === "interactive") {
+                                    setTimeout(initUserMap, 300);
+                                } else {
+                                    document.addEventListener("DOMContentLoaded", function() {
+                                        setTimeout(initUserMap, 300);
+                                    });
+                                }
                             })();
                         </script>
                         ';
                         
-                        return new \Illuminate\Support\HtmlString($html);
+                        return new HtmlString($html);
                     })
                     ->visible(fn ($record) => $record->profile && $record->profile->latitude && $record->profile->longitude)
                     ->columnSpanFull(),
