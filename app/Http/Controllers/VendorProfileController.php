@@ -128,6 +128,72 @@ class VendorProfileController extends Controller
     }
 
     /**
+     * Upload multiple documents
+     */
+    public function uploadMultipleDocuments(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'license_document' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
+            'vehicle_rc_document' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
+            'insurance_document' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
+            'citizenship_document' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
+            'pan_document' => 'nullable|file|mimes:pdf,jpeg,png,jpg|max:5120',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $vendor = $request->user();
+        $documentFields = [
+            'license_document' => 'license',
+            'vehicle_rc_document' => 'vehicle_rc',
+            'insurance_document' => 'insurance',
+            'citizenship_document' => 'citizenship',
+            'pan_document' => 'pan',
+        ];
+
+        $uploadedDocuments = [];
+        $updateData = [];
+
+        foreach ($documentFields as $field => $documentType) {
+            if ($request->hasFile($field)) {
+                $path = $this->uploadFile(
+                    $request->file($field),
+                    'documents/vendors',
+                    'vendor_' . $vendor->id . '_' . $documentType
+                );
+
+                // Delete old document if exists
+                if ($vendor->profile && $vendor->profile->{$field}) {
+                    Storage::disk('public')->delete($vendor->profile->{$field});
+                }
+
+                $updateData[$field] = $path;
+                $uploadedDocuments[$field] = $path;
+            }
+        }
+
+        if (empty($updateData)) {
+            return response()->json([
+                'message' => 'No documents provided',
+                'errors' => ['documents' => ['At least one document must be provided']]
+            ], 422);
+        }
+
+        $profile = $vendor->profile()->updateOrCreate(
+            ['vendor_id' => $vendor->id],
+            $updateData
+        );
+
+        return response()->json([
+            'message' => 'Documents uploaded successfully',
+            'uploaded_documents' => $uploadedDocuments,
+            'profile' => $profile
+        ]);
+    }
+
+    /**
      * Update service area
      */
     public function updateServiceArea(Request $request)
