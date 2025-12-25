@@ -4,6 +4,9 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\UserProfileController;
 use App\Http\Controllers\VendorProfileController;
+use App\Http\Controllers\VehicleController;
+use App\Http\Controllers\PaymentController;
+use App\Http\Controllers\FiscalYearController;
 
 // Authentication Routes
 Route::post('/register', [AuthController::class, 'register']);
@@ -25,6 +28,23 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/profile/picture', [UserProfileController::class, 'deleteProfilePicture']);
     });
 
+    // Vehicle Routes
+    Route::prefix('vehicles')->group(function () {
+        Route::get('/', [VehicleController::class, 'index']);
+        Route::post('/', [VehicleController::class, 'store']);
+        Route::get('/provinces', [VehicleController::class, 'provinces']);
+        Route::get('/{id}', [VehicleController::class, 'show']);
+        Route::post('/{id}', [VehicleController::class, 'update']);
+        Route::post('/{id}/calculate', [VehicleController::class, 'calculate']);
+    });
+
+    // Payment Routes
+    Route::prefix('payments')->group(function () {
+        Route::get('/', [PaymentController::class, 'index']);
+        Route::post('/', [PaymentController::class, 'store']);
+        Route::get('/{id}', [PaymentController::class, 'show']);
+        Route::put('/{id}/status', [PaymentController::class, 'updateStatus']);
+    });
     // Vendor Profile Routes
     Route::prefix('vendor')->middleware('vendor')->group(function () {
         Route::get('/profile', [VendorProfileController::class, 'show']);
@@ -41,4 +61,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/toggle-online', [VendorProfileController::class, 'toggleOnlineStatus']);
         Route::post('/toggle-available', [VendorProfileController::class, 'toggleAvailableStatus']);
     });
+
+    
 });
+
+// Public Routes
+Route::get('/fiscal-years', [FiscalYearController::class, 'index']);
+Route::get('/fiscal-years/current', [FiscalYearController::class, 'current']);

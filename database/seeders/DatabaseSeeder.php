@@ -20,6 +20,13 @@ class DatabaseSeeder extends Seeder
             AdminUserSeeder::class,
             DummyUsersSeeder::class,
             DummyVendorsSeeder::class,
+            // Vehicle tax system seeders
+            ProvinceSeeder::class,
+            FiscalYearSeeder::class,
+            PenaltyConfigSeeder::class,
+            TaxRateSeeder::class,
+            InsuranceRateSeeder::class,
+            VehicleSeeder::class,
         ]);
 
         // User::factory(10)->create();

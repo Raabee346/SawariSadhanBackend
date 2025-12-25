@@ -39,13 +39,18 @@ class AdminPanelProvider extends PanelProvider
             ->pages([
                 Dashboard::class,
             ])
+            ->navigationGroups([
+                'Settings',
+                'Vehicle Management',
+                'Tax & Insurance'
+            ])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
             ->widgets([
                 //total user
                 TotalUserWidget::class,
                 //total vendor
                 TotalVendorWidget::class,
-                AccountWidget::class,
+                // AccountWidget::class,
                 // FilamentInfoWidget::class,
                 
             ])

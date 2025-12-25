@@ -55,4 +55,12 @@ class User extends Authenticatable
     {
         return $this->hasOne(UserProfile::class);
     }
+
+    /**
+     * Get the user's vehicles.
+     */
+    public function vehicles()
+    {
+        return $this->hasMany(Vehicle::class);
+    }
 }
