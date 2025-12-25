@@ -49,7 +49,7 @@ class VehicleSeeder extends Seeder
                 'model' => 'Corolla',
                 'engine_capacity' => 1800,
                 'manufacturing_year' => 2021,
-                'registration_date' => NepalDateService::toAD('2078-05-04'), // BS: 2078-05-04
+                'registration_date' => '2078-05-04', // BS date stored directly
                 'is_commercial' => false,
                 'verification_status' => 'approved',
             ],
@@ -63,7 +63,7 @@ class VehicleSeeder extends Seeder
                 'model' => 'P1',
                 'engine_capacity' => 1200,
                 'manufacturing_year' => 2022,
-                'registration_date' => NepalDateService::toAD('2078-11-26'), // BS: 2078-11-26
+                'registration_date' => '2078-11-26', // BS date stored directly
                 'is_commercial' => false,
                 'verification_status' => 'pending',
             ],
@@ -77,7 +77,7 @@ class VehicleSeeder extends Seeder
                 'model' => 'Bolero',
                 'engine_capacity' => 2500,
                 'manufacturing_year' => 2019,
-                'registration_date' => NepalDateService::toAD('2076-07-19'), // BS: 2076-07-19
+                'registration_date' => '2076-07-19', // BS date stored directly
                 'is_commercial' => true,
                 'verification_status' => 'approved',
             ],
@@ -91,7 +91,7 @@ class VehicleSeeder extends Seeder
                 'model' => 'FZ',
                 'engine_capacity' => 150,
                 'manufacturing_year' => 2023,
-                'registration_date' => NepalDateService::toAD('2080-02-17'), // BS: 2080-02-17
+                'registration_date' => '2080-02-17', // BS date stored directly
                 'is_commercial' => false,
                 'verification_status' => 'approved',
             ],
