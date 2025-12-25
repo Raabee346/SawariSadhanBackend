@@ -60,6 +60,8 @@ class VehicleController extends Controller
             'insurance' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
             'owner_ctznship_front' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
             'owner_ctznship_back' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
+            'last_renewed_date' => 'nullable|string', // BS date format: YYYY-MM-DD
+            'registration_date' => 'nullable|string', // BS date format: YYYY-MM-DD
         ]);
 
         if ($validator->fails()) {
@@ -92,6 +94,7 @@ class VehicleController extends Controller
             'fuel_type' => $request->fuel_type,
             'brand' => $request->brand,
             'model' => $request->model,
+            'last_renewed_date' => $request->last_renewed_date, // Store BS date directly
             'engine_capacity' => $request->engine_capacity,
             'manufacturing_year' => $request->manufacturing_year,
             'registration_date' => $request->registration_date, // Store BS date directly
