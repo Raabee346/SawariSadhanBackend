@@ -46,10 +46,13 @@ return new class extends Migration
                 ]);
         }
         
-        // Now add unique constraint to chassis_number
-        Schema::table('vehicles', function (Blueprint $table) {
-            $table->unique('chassis_number');
-        });
+        // Now add unique constraint to chassis_number if it doesn't exist
+        $indexExists = \DB::select("SHOW INDEX FROM vehicles WHERE Key_name = 'vehicles_chassis_number_unique'");
+        if (empty($indexExists)) {
+            Schema::table('vehicles', function (Blueprint $table) {
+                $table->unique('chassis_number');
+            });
+        }
         
         // Make owner_name required
         Schema::table('vehicles', function (Blueprint $table) {
