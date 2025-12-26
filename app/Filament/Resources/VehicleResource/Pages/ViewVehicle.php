@@ -137,21 +137,24 @@ class ViewVehicle extends ViewRecord
                                 // Check if file exists
                                 if (!Storage::disk('public')->exists($path)) {
                                     $html .= '<div style="border: 2px dashed #d1d5db; border-radius: 8px; padding: 20px; background: #f9fafb; text-align: center;">';
-                                    $html .= '<h4 style="margin: 0 0 10px 0; font-size: 14px; color: #9ca3af;">' . $label . '</h4>';
-                                    $html .= '<p style="margin-top: 10px; color: #9ca3af; font-size: 12px;">File not found</p>';
+                                    $html .= '<h4 style="margin: 0 0 10px 0; font-size: 14px; color: #9ca3af;">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</h4>';
+                                    $html .= '<p style="margin-top: 10px; color: #9ca3af; font-size: 12px;">File not found: ' . htmlspecialchars($path, ENT_QUOTES, 'UTF-8') . '</p>';
                                     $html .= '</div>';
                                     continue;
                                 }
                                 
+                                // Generate URL - files are stored at storage/app/public/vehicles/documents/
+                                // The path in DB is like: vehicles/documents/filename.jpg
+                                // We need: /storage/vehicles/documents/filename.jpg
                                 $fileUrl = asset('storage/' . $path);
-                                $extension = pathinfo($path, PATHINFO_EXTENSION);
+                                $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
                                 
-                                if (in_array(strtolower($extension), ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+                                if (in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
                                     // Display image
                                     $html .= '<div style="border: 2px solid #e5e7eb; border-radius: 8px; padding: 10px; background: white;">';
                                     $html .= '<h4 style="margin: 0 0 10px 0; font-size: 14px; color: #374151;">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</h4>';
                                     $html .= '<a href="' . htmlspecialchars($fileUrl, ENT_QUOTES, 'UTF-8') . '" target="_blank">';
-                                    $html .= '<img src="' . htmlspecialchars($fileUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '" style="width: 100%; height: 200px; object-fit: cover; border-radius: 6px; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform=\'scale(1.05)\'" onmouseout="this.style.transform=\'scale(1)\'">';
+                                    $html .= '<img src="' . htmlspecialchars($fileUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '" style="width: 100%; height: 200px; object-fit: cover; border-radius: 6px; cursor: pointer; transition: transform 0.2s; background: #f3f4f6;" onmouseover="this.style.transform=\'scale(1.05)\'" onmouseout="this.style.transform=\'scale(1)\'">';
                                     $html .= '</a>';
                                     $html .= '<div style="margin-top: 8px; text-align: center;">';
                                     $html .= '<a href="' . htmlspecialchars($fileUrl, ENT_QUOTES, 'UTF-8') . '" target="_blank" style="color: #3b82f6; text-decoration: none; font-size: 12px;">🔍 View Full Size</a>';
