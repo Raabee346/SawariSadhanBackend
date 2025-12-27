@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    'khalti' => [
+        'secret_key' => env('KHALTI_SECRET_KEY', 'test_secret_key_xxxxxxxxxxxxxxxxx'),
+        'public_key' => env('KHALTI_PUBLIC_KEY', 'test_public_key_xxxxxxxxxxxxxxxxx'),
+        'sandbox' => env('KHALTI_SANDBOX', true), // Set to false for production
+        'return_url' => env('KHALTI_RETURN_URL', ''),
+        'website_url' => env('KHALTI_WEBSITE_URL', ''),
+    ],
+
 ];

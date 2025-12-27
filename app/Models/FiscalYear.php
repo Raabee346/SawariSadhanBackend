@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Traits\HasBSTimestamps;
 
 class FiscalYear extends Model
 {
-    use HasFactory;
+    use HasFactory, HasBSTimestamps;
 
     protected $fillable = [
         'year',
@@ -36,5 +37,6 @@ class FiscalYear extends Model
     {
         return $this->hasMany(Payment::class);
     }
+
 }
 

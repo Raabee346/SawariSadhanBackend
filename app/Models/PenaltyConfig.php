@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Traits\HasBSTimestamps;
 
 class PenaltyConfig extends Model
 {
-    use HasFactory;
+    use HasFactory, HasBSTimestamps;
 
     protected $fillable = [
         'duration_label',
@@ -40,5 +41,6 @@ class PenaltyConfig extends Model
 
         return $config ? $config->penalty_percentage : 0;
     }
+
 }
 

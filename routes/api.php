@@ -44,6 +44,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [PaymentController::class, 'store']);
         Route::get('/{id}', [PaymentController::class, 'show']);
         Route::put('/{id}/status', [PaymentController::class, 'updateStatus']);
+        Route::post('/{id}/verify-khalti', [PaymentController::class, 'verifyKhaltiPayment']);
     });
     // Vendor Profile Routes
     Route::prefix('vendor')->middleware('vendor')->group(function () {
@@ -68,3 +69,6 @@ Route::middleware('auth:sanctum')->group(function () {
 // Public Routes
 Route::get('/fiscal-years', [FiscalYearController::class, 'index']);
 Route::get('/fiscal-years/current', [FiscalYearController::class, 'current']);
+
+// Khalti Callback (called by Khalti server, no auth required)
+Route::post('/payments/khalti/callback', [PaymentController::class, 'khaltiCallback']);

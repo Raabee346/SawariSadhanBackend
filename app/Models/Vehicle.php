@@ -5,10 +5,11 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
+use App\Traits\HasBSTimestamps;
 
 class Vehicle extends Model
 {
-    use HasFactory;
+    use HasFactory, HasBSTimestamps;
 
     protected $fillable = [
         'user_id',
@@ -132,5 +133,6 @@ class Vehicle extends Model
     {
         return $this->verification_status === 'pending';
     }
+
 }
 
