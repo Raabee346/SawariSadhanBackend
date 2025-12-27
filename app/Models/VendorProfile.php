@@ -46,8 +46,7 @@ class VendorProfile extends Model
     ];
 
     protected $casts = [
-        'date_of_birth' => 'date',
-        'license_expiry' => 'date',
+        // date_of_birth and license_expiry are stored as strings (BS format: YYYY-MM-DD)
         'service_latitude' => 'decimal:8',
         'service_longitude' => 'decimal:8',
         'is_verified' => 'boolean',
@@ -92,6 +91,7 @@ class VendorProfile extends Model
 
     /**
      * Check if license is expired.
+     * Note: license_expiry is stored as BS date string (YYYY-MM-DD format)
      */
     public function isLicenseExpired()
     {
@@ -99,7 +99,14 @@ class VendorProfile extends Model
             return false;
         }
 
-        return $this->license_expiry->isPast();
+        // Convert BS date to AD date for comparison
+        try {
+            $adDate = \App\Services\NepalDateService::toAD($this->license_expiry);
+            return $adDate->isPast();
+        } catch (\Exception $e) {
+            // If conversion fails, return false
+            return false;
+        }
     }
 
 

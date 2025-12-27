@@ -25,9 +25,13 @@ class VendorProfileController extends Controller
             ], 404);
         }
 
+        // Include vendor name in the profile response
+        $profileData = $profile->toArray();
+        $profileData['name'] = $vendor->name;
+
         return response()->json([
             'message' => 'Profile retrieved successfully',
-            'profile' => $profile,
+            'profile' => $profileData,
             'availabilities' => $vendor->availabilities
         ]);
     }
@@ -39,7 +43,7 @@ class VendorProfileController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'phone_number' => 'nullable|string|max:15',
-            'date_of_birth' => 'nullable|date|before:today',
+            'date_of_birth' => 'nullable|string', // BS date format: YYYY-MM-DD (e.g., 2080-05-15)
             'gender' => 'nullable|in:male,female,other',
             'address' => 'nullable|string',
             'city' => 'nullable|string|max:100',
@@ -51,10 +55,10 @@ class VendorProfileController extends Controller
             'vehicle_color' => 'nullable|string|max:50',
             'vehicle_year' => 'nullable|integer|min:1900|max:' . (date('Y') + 1),
             'license_number' => 'nullable|string|max:50',
-            'license_expiry' => 'nullable|date|after:today',
+            'license_expiry' => 'nullable|string', // BS date format: YYYY-MM-DD (e.g., 2080-05-15)
             'service_latitude' => 'nullable|numeric|between:-90,90',
             'service_longitude' => 'nullable|numeric|between:-180,180',
-            'service_radius' => 'nullable|integer|min:100|max:50000',
+            'service_radius' => 'nullable|integer|min:1|max:50000', // Reduced minimum from 100 to 1 (in km)
             'service_address' => 'nullable|string',
             'profile_picture' => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
         ]);
@@ -201,7 +205,7 @@ class VendorProfileController extends Controller
         $validator = Validator::make($request->all(), [
             'service_latitude' => 'required|numeric|between:-90,90',
             'service_longitude' => 'required|numeric|between:-180,180',
-            'service_radius' => 'required|integer|min:100|max:50000',
+            'service_radius' => 'required|integer|min:1|max:50000', // Reduced minimum from 100 to 1 (in km)
             'service_address' => 'nullable|string',
         ]);
 
