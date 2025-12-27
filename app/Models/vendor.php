@@ -6,10 +6,11 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use App\Traits\HasBSTimestamps;
 
 class Vendor extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable, HasBSTimestamps;
 
     protected $fillable = [
         'unique_id',
@@ -65,4 +66,5 @@ class Vendor extends Authenticatable
 
         return $availability && $availability->isAvailableAt();
     }
+
 }

@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Traits\HasBSTimestamps;
 
 class Payment extends Model
 {
-    use HasFactory;
+    use HasFactory, HasBSTimestamps;
 
     protected $fillable = [
         'user_id',
@@ -54,5 +55,6 @@ class Payment extends Model
     {
         return $this->payment_status === 'completed';
     }
+
 }
 

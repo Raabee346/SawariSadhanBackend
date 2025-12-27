@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Traits\HasBSTimestamps;
 
 class VendorProfile extends Model
 {
-    use HasFactory;
+    use HasFactory, HasBSTimestamps;
 
     protected $fillable = [
         'vendor_id',
@@ -100,5 +101,7 @@ class VendorProfile extends Model
 
         return $this->license_expiry->isPast();
     }
+
+
 }
 

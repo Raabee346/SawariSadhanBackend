@@ -4,9 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Carbon\Carbon;
+use App\Traits\HasBSTimestamps;
 
 class OtpCode extends Model
 {
+    use HasBSTimestamps;
+    
     protected $table = 'otp_codes';
     
     protected $fillable = [
@@ -24,5 +27,6 @@ class OtpCode extends Model
     {
         return $this->expires_at->isPast();
     }
+
 }
 

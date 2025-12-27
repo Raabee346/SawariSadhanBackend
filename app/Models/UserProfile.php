@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Traits\HasBSTimestamps;
 
 class UserProfile extends Model
 {
-    use HasFactory;
+    use HasFactory, HasBSTimestamps;
 
     protected $fillable = [
         'user_id',
@@ -53,5 +54,6 @@ class UserProfile extends Model
 
         return implode(', ', $parts);
     }
+
 }
 

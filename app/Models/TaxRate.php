@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Traits\HasBSTimestamps;
 
 class TaxRate extends Model
 {
-    use HasFactory;
+    use HasFactory, HasBSTimestamps;
 
     protected $fillable = [
         'province_id',
@@ -87,5 +88,6 @@ class TaxRate extends Model
             ->orderBy('fiscal_year_id', 'desc')
             ->first();
     }
+
 }
 

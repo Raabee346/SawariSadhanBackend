@@ -5,10 +5,11 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Carbon\Carbon;
+use App\Traits\HasBSTimestamps;
 
 class VendorAvailability extends Model
 {
-    use HasFactory;
+    use HasFactory, HasBSTimestamps;
 
     protected $fillable = [
         'vendor_id',
@@ -64,5 +65,6 @@ class VendorAvailability extends Model
         return Carbon::parse($this->start_time)->format('h:i A') . ' - ' . 
                Carbon::parse($this->end_time)->format('h:i A');
     }
+
 }
 

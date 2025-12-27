@@ -6,6 +6,7 @@ use App\Models\Payment;
 use App\Models\Vehicle;
 use App\Models\FiscalYear;
 use App\Services\TaxCalculationService;
+use App\Services\KhaltiPaymentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -13,10 +14,12 @@ use Illuminate\Support\Str;
 class PaymentController extends Controller
 {
     protected $taxCalculationService;
+    protected $khaltiPaymentService;
 
-    public function __construct(TaxCalculationService $taxCalculationService)
+    public function __construct(TaxCalculationService $taxCalculationService, KhaltiPaymentService $khaltiPaymentService)
     {
         $this->taxCalculationService = $taxCalculationService;
+        $this->khaltiPaymentService = $khaltiPaymentService;
     }
 
     /**
@@ -80,6 +83,7 @@ class PaymentController extends Controller
             }
 
             // Create payment record
+            $transactionId = 'TXN-' . strtoupper(Str::random(12));
             $payment = Payment::create([
                 'user_id' => $request->user()->id,
                 'vehicle_id' => $vehicle->id,
@@ -91,8 +95,55 @@ class PaymentController extends Controller
                 'total_amount' => $yearCalculation['subtotal'],
                 'payment_status' => 'pending',
                 'payment_method' => $request->payment_method,
-                'transaction_id' => 'TXN-' . strtoupper(Str::random(12)),
+                'transaction_id' => $transactionId,
             ]);
+
+            // If payment method is Khalti, initiate payment
+            if ($request->payment_method === 'khalti') {
+                $productName = "Vehicle Tax Payment - {$vehicle->registration_number}";
+                $additionalData = [
+                    'customer_info' => [
+                        'name' => $vehicle->owner_name,
+                        'email' => $request->user()->email,
+                    ]
+                ];
+                
+                $khaltiResponse = $this->khaltiPaymentService->getPaymentDataForMobile(
+                    $yearCalculation['subtotal'],
+                    $transactionId,
+                    $productName,
+                    $additionalData
+                );
+
+                if ($khaltiResponse['success']) {
+                    // Store pidx in payment details for verification later
+                    $payment->update([
+                        'payment_details' => [
+                            'pidx' => $khaltiResponse['pidx'],
+                            'khalti_transaction_id' => $khaltiResponse['pidx'],
+                        ]
+                    ]);
+
+                    $payment->load(['vehicle.province', 'fiscalYear']);
+
+                    return response()->json([
+                        'success' => true,
+                        'message' => 'Payment initialized. Please complete the payment.',
+                        'data' => $payment,
+                        'khalti' => [
+                            'pidx' => $khaltiResponse['pidx'],
+                            'payment_url' => $khaltiResponse['payment_url'],
+                        ],
+                    ], 201);
+                } else {
+                    // If Khalti initialization fails, still return payment record
+                    return response()->json([
+                        'success' => false,
+                        'message' => $khaltiResponse['message'] ?? 'Failed to initialize Khalti payment',
+                        'data' => $payment,
+                    ], 400);
+                }
+            }
 
             $payment->load(['vehicle.province', 'fiscalYear']);
 
@@ -169,6 +220,143 @@ class PaymentController extends Controller
             'success' => true,
             'data' => $payment,
         ]);
+    }
+
+    /**
+     * Verify Khalti payment (callback from mobile app)
+     * Mobile app should call this after user completes payment
+     */
+    public function verifyKhaltiPayment(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'pidx' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payment = Payment::where('user_id', $request->user()->id)
+            ->findOrFail($id);
+
+        if ($payment->payment_method !== 'khalti') {
+            return response()->json([
+                'success' => false,
+                'message' => 'This payment is not a Khalti payment',
+            ], 400);
+        }
+
+        // Verify payment with Khalti
+        $verification = $this->khaltiPaymentService->verifyPayment($request->pidx);
+
+        if ($verification['success']) {
+            $payment->update([
+                'payment_status' => 'completed',
+                'transaction_id' => $verification['transaction_id'] ?? $payment->transaction_id,
+                'payment_details' => array_merge($payment->payment_details ?? [], [
+                    'pidx' => $request->pidx,
+                    'khalti_transaction_id' => $verification['transaction_id'] ?? null,
+                    'verified_at' => now()->toDateTimeString(),
+                    'verification_response' => $verification['data'] ?? null,
+                ]),
+                'payment_date' => now(),
+            ]);
+
+            // Update vehicle's last_renewed_date
+            $vehicle = $payment->vehicle;
+            $fiscalYear = $payment->fiscalYear;
+            $vehicle->update([
+                'last_renewed_date' => $fiscalYear->end_date,
+            ]);
+
+            $payment->load(['vehicle.province', 'fiscalYear']);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Payment verified successfully',
+                'data' => $payment,
+            ]);
+        }
+
+        // Payment verification failed
+        $payment->update([
+            'payment_status' => 'failed',
+            'payment_details' => array_merge($payment->payment_details ?? [], [
+                'verification_error' => $verification['message'] ?? 'Verification failed',
+                'verification_response' => $verification['data'] ?? null,
+            ]),
+        ]);
+
+        return response()->json([
+            'success' => false,
+            'message' => $verification['message'] ?? 'Payment verification failed',
+            'data' => $payment,
+        ], 400);
+    }
+
+    /**
+     * Khalti payment callback (webhook from Khalti server)
+     * This is called by Khalti server after payment is completed
+     */
+    public function khaltiCallback(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'pidx' => 'required|string',
+            'transaction_id' => 'nullable|string',
+            'amount' => 'nullable|numeric',
+            'status' => 'nullable|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid callback data',
+            ], 422);
+        }
+
+        // Verify payment with Khalti
+        $verification = $this->khaltiPaymentService->verifyPayment($request->pidx);
+
+        if ($verification['success']) {
+            // Find payment by transaction_id stored in payment_details
+            $payment = Payment::where('payment_method', 'khalti')
+                ->whereJsonContains('payment_details->pidx', $request->pidx)
+                ->first();
+
+            if ($payment && $payment->payment_status === 'pending') {
+                $payment->update([
+                    'payment_status' => 'completed',
+                    'transaction_id' => $verification['transaction_id'] ?? $request->transaction_id ?? $payment->transaction_id,
+                    'payment_details' => array_merge($payment->payment_details ?? [], [
+                        'khalti_transaction_id' => $verification['transaction_id'] ?? null,
+                        'callback_data' => $request->all(),
+                        'verified_at' => now()->toDateTimeString(),
+                    ]),
+                    'payment_date' => now(),
+                ]);
+
+                // Update vehicle's last_renewed_date
+                $vehicle = $payment->vehicle;
+                $fiscalYear = $payment->fiscalYear;
+                $vehicle->update([
+                    'last_renewed_date' => $fiscalYear->end_date,
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Payment callback processed',
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Payment verification failed',
+        ], 400);
     }
 }
 

@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Traits\HasBSTimestamps;
 
 class InsuranceRate extends Model
 {
-    use HasFactory;
+    use HasFactory, HasBSTimestamps;
 
     protected $fillable = [
         'vehicle_type',
@@ -75,5 +76,6 @@ class InsuranceRate extends Model
             ->orderBy('fiscal_year_id', 'desc')
             ->first();
     }
+
 }
 
