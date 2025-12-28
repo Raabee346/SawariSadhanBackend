@@ -50,7 +50,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('vendor')->middleware('vendor')->group(function () {
         Route::get('/profile', [VendorProfileController::class, 'show']);
         Route::post('/profile', [VendorProfileController::class, 'updateOrCreate']);
-        Route::post('/profile/document', [VendorProfileController::class, 'uploadDocument']);
         Route::post('/profile/documents', [VendorProfileController::class, 'uploadMultipleDocuments']);
         Route::post('/profile/service-area', [VendorProfileController::class, 'updateServiceArea']);
         

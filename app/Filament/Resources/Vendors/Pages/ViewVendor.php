@@ -9,6 +9,8 @@ use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\HtmlString;
+use App\Services\NepalDateService;
+use Carbon\Carbon;
 
 class ViewVendor extends ViewRecord
 {
@@ -49,11 +51,37 @@ class ViewVendor extends ViewRecord
                 
                 Placeholder::make('created_at')
                     ->label('Registered On')
-                    ->content(fn ($record) => $record->created_at->format('Y-m-d H:i')),
+                    ->content(function ($record) {
+                        // Get raw value from database to avoid double BS conversion
+                        $rawValue = $record->getRawOriginal('created_at');
+                        if (!$rawValue) {
+                            return 'N/A';
+                        }
+                        try {
+                            $carbon = Carbon::parse($rawValue);
+                            // Convert to BS format for display
+                            return NepalDateService::toBS($carbon);
+                        } catch (\Exception $e) {
+                            return $rawValue;
+                        }
+                    }),
                 
                 Placeholder::make('updated_at')
                     ->label('Last Updated')
-                    ->content(fn ($record) => $record->updated_at->format('Y-m-d H:i')),
+                    ->content(function ($record) {
+                        // Get raw value from database to avoid double BS conversion
+                        $rawValue = $record->getRawOriginal('updated_at');
+                        if (!$rawValue) {
+                            return 'N/A';
+                        }
+                        try {
+                            $carbon = Carbon::parse($rawValue);
+                            // Convert to BS format for display
+                            return NepalDateService::toBS($carbon);
+                        } catch (\Exception $e) {
+                            return $rawValue;
+                        }
+                    }),
                 
                 Placeholder::make('heading_personal')
                     ->label('PERSONAL DETAILS')
@@ -84,9 +112,11 @@ class ViewVendor extends ViewRecord
                         }
                         
                         $imageUrl = asset('storage/' . $record->profile->profile_picture);
+                        $uploadedDate = $record->profile->updated_at;
+                        $uploadedDateFormatted = is_string($uploadedDate) ? $uploadedDate : ($uploadedDate ? $uploadedDate->format('Y-m-d H:i') : 'N/A');
                         return new HtmlString('<div style="text-align: center;">
                             <img src="' . htmlspecialchars($imageUrl, ENT_QUOTES, 'UTF-8') . '" alt="Profile Picture" style="max-width: 300px; max-height: 300px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); object-fit: cover;" onerror="this.onerror=null; this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMzAwIiB2aWV3Qm94PSIwIDAgMTAwIDEwMCI+PHJlY3Qgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiIGZpbGw9IiNlNWU3ZWIiLz48cGF0aCBmaWxsPSIjOWNhM2FmIiBkPSJNNTAgNDVhMTIgMTIgMCAxIDAgMC0yNCAxMiAxMiAwIDAgMCAwIDI0em0wIDVjLTEzLjggMC0yNSA4LjQtMjUgMTkuMmg1MEM3NSA1OC40IDYzLjggNTAgNTAgNTB6Ii8+PC9zdmc+\';">
-                            <p style="margin-top: 10px; color: #6b7280; font-size: 12px;">Uploaded: ' . htmlspecialchars($record->profile->updated_at->format('Y-m-d H:i'), ENT_QUOTES, 'UTF-8') . '</p>
+                            <p style="margin-top: 10px; color: #6b7280; font-size: 12px;">Uploaded: ' . htmlspecialchars($uploadedDateFormatted, ENT_QUOTES, 'UTF-8') . '</p>
                         </div>');
                     })
                     ->visible(fn ($record) => $record->profile !== null)
@@ -99,7 +129,13 @@ class ViewVendor extends ViewRecord
                 
                 Placeholder::make('profile.date_of_birth')
                     ->label('🎂 Date of Birth')
-                    ->content(fn ($record) => $record->profile?->date_of_birth?->format('Y-m-d') ?? 'Not Provided')
+                    ->content(function ($record) {
+                        $date = $record->profile?->date_of_birth;
+                        if (!$date) {
+                            return 'Not Provided';
+                        }
+                        return is_string($date) ? $date : ($date instanceof \Carbon\Carbon ? $date->format('Y-m-d') : $date);
+                    })
                     ->visible(fn ($record) => $record->profile !== null),
                 
                 Placeholder::make('profile.gender')
@@ -171,7 +207,23 @@ class ViewVendor extends ViewRecord
                 
                 Placeholder::make('profile.license_expiry')
                     ->label('License Expiry')
-                    ->content(fn ($record) => $record->profile?->license_expiry ? $record->profile->license_expiry->format('Y-m-d') . ($record->profile->license_expiry->isFuture() ? ' ✅' : ' ⚠️ EXPIRED') : 'Not Provided')
+                    ->content(function ($record) {
+                        $date = $record->profile?->license_expiry;
+                        if (!$date) {
+                            return 'Not Provided';
+                        }
+                        if (is_string($date)) {
+                            // BS date string - check if expired by converting to AD
+                            try {
+                                $adDate = \App\Services\NepalDateService::toAD($date);
+                                return $date . ($adDate->isFuture() ? ' ✅' : ' ⚠️ EXPIRED');
+                            } catch (\Exception $e) {
+                                return $date;
+                            }
+                        }
+                        // Carbon instance
+                        return $date->format('Y-m-d') . ($date->isFuture() ? ' ✅' : ' ⚠️ EXPIRED');
+                    })
                     ->visible(fn ($record) => $record->profile !== null),
                 
                 Placeholder::make('all_documents')
