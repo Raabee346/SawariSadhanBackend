@@ -47,6 +47,7 @@ class PaymentController extends Controller
             'vehicle_id' => 'required|exists:vehicles,id',
             'fiscal_year_id' => 'required|exists:fiscal_years,id',
             'payment_method' => 'required|string|in:esewa,khalti,bank_transfer,cash',
+            'include_insurance' => 'nullable|boolean', // true = include insurance, false = user has valid insurance (no insurance fee)
         ]);
 
         if ($validator->fails()) {
@@ -69,7 +70,9 @@ class PaymentController extends Controller
 
         try {
             // Calculate tax and insurance
-            $calculation = $this->taxCalculationService->calculate($vehicle, $request->fiscal_year_id);
+            // include_insurance: true = user wants insurance, false = user has valid insurance (no insurance fee)
+            $includeInsurance = $request->input('include_insurance', true); // Default to true for backward compatibility
+            $calculation = $this->taxCalculationService->calculate($vehicle, $request->fiscal_year_id, $includeInsurance);
             
             // Find the specific year calculation
             $yearCalculation = collect($calculation['calculations'])

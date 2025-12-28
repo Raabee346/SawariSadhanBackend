@@ -17,8 +17,12 @@ class TaxCalculationService
 
     /**
      * Calculate tax and insurance for a vehicle
+     * 
+     * @param Vehicle $vehicle
+     * @param int|null $fiscalYearId
+     * @param bool $includeInsurance Whether to include insurance in calculation (true = yes, false = no/has valid insurance)
      */
-    public function calculate(Vehicle $vehicle, $fiscalYearId = null)
+    public function calculate(Vehicle $vehicle, $fiscalYearId = null, $includeInsurance = true)
     {
         if (!$vehicle->isVerified()) {
             throw new \Exception('Vehicle must be verified before calculation');
@@ -68,7 +72,8 @@ class TaxCalculationService
                 $vehicle,
                 $year['fiscal_year'],
                 $year['expiry_date'],
-                $year['days_delayed']
+                $year['days_delayed'],
+                $includeInsurance
             );
 
             $calculations[] = $yearCalculation;
@@ -105,8 +110,14 @@ class TaxCalculationService
 
     /**
      * Calculate for a specific fiscal year
+     * 
+     * @param Vehicle $vehicle
+     * @param FiscalYear $fiscalYear
+     * @param Carbon $expiryDate
+     * @param int $daysDelayed
+     * @param bool $includeInsurance Whether to include insurance (true = calculate insurance, false = set to 0)
      */
-    private function calculateForYear(Vehicle $vehicle, FiscalYear $fiscalYear, Carbon $expiryDate, $daysDelayed)
+    private function calculateForYear(Vehicle $vehicle, FiscalYear $fiscalYear, Carbon $expiryDate, $daysDelayed, $includeInsurance = true)
     {
         // Get tax rate
         $taxRate = TaxRate::findRate(
@@ -140,39 +151,46 @@ class TaxCalculationService
             throw new \Exception($message);
         }
 
-        // Get insurance rate
-        $insuranceRate = InsuranceRate::findRate(
-            $fiscalYear->id,
-            $vehicle->vehicle_type,
-            $vehicle->fuel_type,
-            $vehicle->engine_capacity
-        );
-
-        if (!$insuranceRate) {
-            // Debug: Check what rates exist
-            $availableRates = InsuranceRate::where('vehicle_type', $vehicle->vehicle_type)
-                ->where('fuel_type', $vehicle->fuel_type)
-                ->where('fiscal_year_id', $fiscalYear->id)
-                ->pluck('capacity_value')
-                ->toArray();
-            
-            $availableFiscalYears = InsuranceRate::where('vehicle_type', $vehicle->vehicle_type)
-                ->where('fuel_type', $vehicle->fuel_type)
-                ->distinct()
-                ->pluck('fiscal_year_id')
-                ->toArray();
-            
-            $message = "Insurance rate not found for vehicle type: {$vehicle->vehicle_type}, fuel: {$vehicle->fuel_type}, capacity: {$vehicle->engine_capacity}, fiscal_year_id: {$fiscalYear->id}. ";
-            $message .= "Available capacities: " . implode(', ', $availableRates) . ". ";
-            $message .= "Available fiscal years: " . implode(', ', $availableFiscalYears) . ". ";
-            $message .= "Please add insurance rates for this vehicle configuration in the admin panel.";
-            
-            throw new \Exception($message);
-        }
-
         $taxAmount = $taxRate->annual_tax_amount;
         $renewalFee = $taxRate->renewal_fee;
-        $insuranceAmount = $insuranceRate->annual_premium;
+        $insuranceAmount = 0; // Default to 0
+
+        // Only calculate insurance if user wants to include it
+        // includeInsurance = true: User needs insurance (calculate insurance fee)
+        // includeInsurance = false: User has valid insurance (set insurance to 0)
+        if ($includeInsurance) {
+            // Get insurance rate
+            $insuranceRate = InsuranceRate::findRate(
+                $fiscalYear->id,
+                $vehicle->vehicle_type,
+                $vehicle->fuel_type,
+                $vehicle->engine_capacity
+            );
+
+            if (!$insuranceRate) {
+                // Debug: Check what rates exist
+                $availableRates = InsuranceRate::where('vehicle_type', $vehicle->vehicle_type)
+                    ->where('fuel_type', $vehicle->fuel_type)
+                    ->where('fiscal_year_id', $fiscalYear->id)
+                    ->pluck('capacity_value')
+                    ->toArray();
+                
+                $availableFiscalYears = InsuranceRate::where('vehicle_type', $vehicle->vehicle_type)
+                    ->where('fuel_type', $vehicle->fuel_type)
+                    ->distinct()
+                    ->pluck('fiscal_year_id')
+                    ->toArray();
+                
+                $message = "Insurance rate not found for vehicle type: {$vehicle->vehicle_type}, fuel: {$vehicle->fuel_type}, capacity: {$vehicle->engine_capacity}, fiscal_year_id: {$fiscalYear->id}. ";
+                $message .= "Available capacities: " . implode(', ', $availableRates) . ". ";
+                $message .= "Available fiscal years: " . implode(', ', $availableFiscalYears) . ". ";
+                $message .= "Please add insurance rates for this vehicle configuration in the admin panel.";
+                
+                throw new \Exception($message);
+            }
+
+            $insuranceAmount = $insuranceRate->annual_premium;
+        }
 
         // Calculate penalty
         $penaltyPercentage = 0;

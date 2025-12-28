@@ -260,6 +260,19 @@ class VehicleController extends Controller
      */
     public function calculate(Request $request, $id)
     {
+        $validator = Validator::make($request->all(), [
+            'fiscal_year_id' => 'nullable|exists:fiscal_years,id',
+            'include_insurance' => 'nullable|boolean', // true = include insurance, false = user has valid insurance (no insurance fee)
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
         $vehicle = Vehicle::where('user_id', $request->user()->id)
             ->findOrFail($id);
 
@@ -272,7 +285,9 @@ class VehicleController extends Controller
 
         try {
             $fiscalYearId = $request->input('fiscal_year_id');
-            $calculation = $this->taxCalculationService->calculate($vehicle, $fiscalYearId);
+            // include_insurance: true = user wants insurance, false = user has valid insurance (no insurance fee)
+            $includeInsurance = $request->input('include_insurance', true); // Default to true for backward compatibility
+            $calculation = $this->taxCalculationService->calculate($vehicle, $fiscalYearId, $includeInsurance);
 
             return response()->json([
                 'success' => true,

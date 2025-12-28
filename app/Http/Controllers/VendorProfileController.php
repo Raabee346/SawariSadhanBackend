@@ -91,47 +91,6 @@ class VendorProfileController extends Controller
     }
 
     /**
-     * Upload document
-     */
-    public function uploadDocument(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'document_type' => 'required|in:license,vehicle_rc,insurance,citizenship,pan',
-            'document' => 'required|file|mimes:pdf,jpeg,png,jpg|max:5120',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        $vendor = $request->user();
-        $documentType = $request->input('document_type');
-        $documentField = $documentType . '_document';
-
-        $path = $this->uploadFile(
-            $request->file('document'),
-            'documents/vendors',
-            'vendor_' . $vendor->id . '_' . $documentType
-        );
-
-        // Delete old document if exists
-        if ($vendor->profile && $vendor->profile->{$documentField}) {
-            Storage::disk('public')->delete($vendor->profile->{$documentField});
-        }
-
-        $profile = $vendor->profile()->updateOrCreate(
-            ['vendor_id' => $vendor->id],
-            [$documentField => $path]
-        );
-
-        return response()->json([
-            'message' => ucfirst($documentType) . ' document uploaded successfully',
-            'document_path' => $path,
-            'profile' => $profile
-        ]);
-    }
-
-    /**
      * Upload multiple documents
      */
     public function uploadMultipleDocuments(Request $request)
