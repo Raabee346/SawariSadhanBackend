@@ -28,9 +28,6 @@ class CreateVendor extends CreateRecord
      */
     protected function mutateFormDataBeforeCreate(array $data): array
     {
-        // Set email as verified by default when admin creates vendor account
-        $data['email_verified_at'] = now();
-
         // Ensure unique_id is set and unique within vendors table
         // Generate if not provided or if it already exists
         if (empty($data['unique_id']) || Vendor::where('unique_id', $data['unique_id'])->exists()) {
@@ -38,5 +35,16 @@ class CreateVendor extends CreateRecord
         }
 
         return $data;
+    }
+
+    /**
+     * After creating the vendor, set email_verified_at to now()
+     * This ensures it works reliably across different hosting environments
+     */
+    protected function afterCreate(): void
+    {
+        // Set email as verified by default when admin creates vendor account
+        $this->record->email_verified_at = now();
+        $this->record->save();
     }
 }
