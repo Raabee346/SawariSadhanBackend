@@ -13,6 +13,9 @@ return [
     | a conventional file to locate the various service credentials.
     |
     */
+    'firebase' =>[
+        'credentials'=> base_path('storage/app/firebase/sawarisewa-34f2e-firebase-adminsdk-fbsvc-1bbe5f1da9.json'),
+    ],
 
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
