@@ -24,6 +24,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'fcm_token',
     ];
 
     /**
@@ -63,6 +64,38 @@ class User extends Authenticatable
     public function vehicles()
     {
         return $this->hasMany(Vehicle::class);
+    }
+
+    /**
+     * Get the vendor profile (if user is a vendor)
+     */
+    public function vendorProfile()
+    {
+        return $this->hasOne(VendorProfile::class);
+    }
+
+    /**
+     * Check if user is a vendor
+     */
+    public function isVendor(): bool
+    {
+        return $this->vendorProfile !== null;
+    }
+
+    /**
+     * Get renewal requests as a user
+     */
+    public function renewalRequests()
+    {
+        return $this->hasMany(RenewalRequest::class, 'user_id');
+    }
+
+    /**
+     * Get renewal requests as a vendor
+     */
+    public function assignedRenewalRequests()
+    {
+        return $this->hasMany(RenewalRequest::class, 'vendor_id');
     }
 
 }

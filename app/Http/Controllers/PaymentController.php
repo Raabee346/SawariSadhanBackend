@@ -9,6 +9,8 @@ use App\Services\TaxCalculationService;
 use App\Services\KhaltiPaymentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class PaymentController extends Controller
@@ -46,7 +48,7 @@ class PaymentController extends Controller
         $validator = Validator::make($request->all(), [
             'vehicle_id' => 'required|exists:vehicles,id',
             'fiscal_year_id' => 'required|exists:fiscal_years,id',
-            'payment_method' => 'required|string|in:esewa,khalti,bank_transfer,cash',
+            'payment_method' => 'required|string|in:esewa,khalti,bank_transfer,cash,cash_on_delivery',
             'include_insurance' => 'nullable|boolean', // true = include insurance, false = user has valid insurance (no insurance fee)
         ]);
 
@@ -68,86 +70,230 @@ class PaymentController extends Controller
             ], 403);
         }
 
+        DB::beginTransaction();
         try {
+            Log::info('Creating payment', [
+                'user_id' => $request->user()->id,
+                'vehicle_id' => $request->vehicle_id,
+                'fiscal_year_id' => $request->fiscal_year_id,
+                'payment_method' => $request->payment_method,
+                'include_insurance' => $request->input('include_insurance'),
+            ]);
+            
             // Calculate tax and insurance
             // include_insurance: true = user wants insurance, false = user has valid insurance (no insurance fee)
             $includeInsurance = $request->input('include_insurance', true); // Default to true for backward compatibility
-            $calculation = $this->taxCalculationService->calculate($vehicle, $request->fiscal_year_id, $includeInsurance);
+            
+            try {
+                $calculation = $this->taxCalculationService->calculate($vehicle, $request->fiscal_year_id, $includeInsurance);
+            } catch (\Exception $e) {
+                DB::rollBack();
+                Log::error('Tax calculation failed', [
+                    'user_id' => $request->user()->id,
+                    'vehicle_id' => $vehicle->id,
+                    'fiscal_year_id' => $request->fiscal_year_id,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Tax calculation failed: ' . $e->getMessage(),
+                ], 500);
+            }
             
             // Find the specific year calculation
             $yearCalculation = collect($calculation['calculations'])
                 ->firstWhere('fiscal_year_id', $request->fiscal_year_id);
 
             if (!$yearCalculation) {
+                DB::rollBack();
+                Log::error('Calculation not found for fiscal year', [
+                    'fiscal_year_id' => $request->fiscal_year_id,
+                    'user_id' => $request->user()->id,
+                ]);
                 return response()->json([
                     'success' => false,
                     'message' => 'Calculation not found for the specified fiscal year',
                 ], 404);
             }
 
+            // Calculate amounts matching Android calculation exactly
+            // Android calculation (PaymentSummaryActivity.java):
+            // - Service Fee = renewalFee + penalties (or 500 if 0)
+            // - Subtotal = roadTax + insurance + serviceFee
+            // - VAT = subtotal * 0.13
+            // - Grand Total = subtotal + VAT
+            
+            $taxAmount = (float) $yearCalculation['tax_amount'];
+            $insuranceAmount = (float) $yearCalculation['insurance_amount'];
+            $renewalFee = (float) $yearCalculation['renewal_fee'];
+            $penaltyAmount = (float) ($yearCalculation['penalty_amount'] + $yearCalculation['renewal_fee_penalty']);
+            
+            // Service fee = renewal fee + penalties (or 500 if 0) - matching Android logic
+            $serviceFee = $renewalFee + $penaltyAmount;
+            if ($serviceFee <= 0) {
+                $serviceFee = 500.0; // Default service fee
+            }
+            
+            // Subtotal = tax + insurance + service fee (matching Android)
+            $subtotal = $taxAmount + $insuranceAmount + $serviceFee;
+            
+            // VAT = 13% on subtotal (matching Android)
+            $vatAmount = round($subtotal * 0.13, 2);
+            
+            // Grand total = subtotal + VAT (matching Android)
+            $grandTotal = round($subtotal + $vatAmount, 2);
+
             // Create payment record
             $transactionId = 'TXN-' . strtoupper(Str::random(12));
-            $payment = Payment::create([
-                'user_id' => $request->user()->id,
-                'vehicle_id' => $vehicle->id,
-                'fiscal_year_id' => $request->fiscal_year_id,
-                'tax_amount' => $yearCalculation['tax_amount'],
-                'renewal_fee' => $yearCalculation['renewal_fee'],
-                'penalty_amount' => $yearCalculation['penalty_amount'] + $yearCalculation['renewal_fee_penalty'],
-                'insurance_amount' => $yearCalculation['insurance_amount'],
-                'total_amount' => $yearCalculation['subtotal'],
-                'payment_status' => 'pending',
-                'payment_method' => $request->payment_method,
+            
+            Log::info('Creating payment record', [
                 'transaction_id' => $transactionId,
+                'tax_amount' => $taxAmount,
+                'renewal_fee' => $renewalFee,
+                'penalty_amount' => $penaltyAmount,
+                'insurance_amount' => $insuranceAmount,
+                'service_fee' => $serviceFee,
+                'vat_amount' => $vatAmount,
+                'subtotal' => $subtotal,
+                'grand_total' => $grandTotal,
             ]);
-
-            // If payment method is Khalti, initiate payment
-            if ($request->payment_method === 'khalti') {
-                $productName = "Vehicle Tax Payment - {$vehicle->registration_number}";
-                $additionalData = [
-                    'customer_info' => [
-                        'name' => $vehicle->owner_name,
-                        'email' => $request->user()->email,
-                    ]
-                ];
+            
+            try {
+                $payment = Payment::create([
+                    'user_id' => $request->user()->id,
+                    'vehicle_id' => $vehicle->id,
+                    'fiscal_year_id' => $request->fiscal_year_id,
+                    'tax_amount' => $taxAmount,
+                    'renewal_fee' => $renewalFee,
+                    'penalty_amount' => $penaltyAmount,
+                    'insurance_amount' => $insuranceAmount,
+                    'total_amount' => $grandTotal, // Save grand total (subtotal + VAT) matching Android
+                    'payment_status' => 'pending',
+                    'payment_method' => $request->payment_method,
+                    'transaction_id' => $transactionId,
+                ]);
                 
-                $khaltiResponse = $this->khaltiPaymentService->getPaymentDataForMobile(
-                    $yearCalculation['subtotal'],
-                    $transactionId,
-                    $productName,
-                    $additionalData
-                );
+                Log::info('Payment created successfully', ['payment_id' => $payment->id]);
+            } catch (\Illuminate\Database\QueryException $e) {
+                DB::rollBack();
+                Log::error('Database error creating payment', [
+                    'error' => $e->getMessage(),
+                    'code' => $e->getCode(),
+                    'sql' => $e->getSql(),
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Database error: ' . $e->getMessage(),
+                ], 500);
+            }
 
-                if ($khaltiResponse['success']) {
-                    // Store pidx in payment details for verification later
+            // If payment method is Cash on Delivery, automatically mark as completed
+            if ($request->payment_method === 'cash_on_delivery' || $request->payment_method === 'cash') {
+                try {
                     $payment->update([
-                        'payment_details' => [
-                            'pidx' => $khaltiResponse['pidx'],
-                            'khalti_transaction_id' => $khaltiResponse['pidx'],
-                        ]
+                        'payment_status' => 'completed',
+                        'payment_date' => now(),
+                    ]);
+                    
+                    Log::info('Payment marked as completed for COD', ['payment_id' => $payment->id]);
+                    
+                    // Commit transaction before loading relationships
+                    DB::commit();
+                    
+                    // Refresh payment to ensure latest data
+                    $payment->refresh();
+                    $payment->load(['vehicle.province', 'fiscalYear']);
+
+                    // Verify payment was actually saved to database
+                    $savedPayment = Payment::find($payment->id);
+                    if (!$savedPayment) {
+                        Log::error('Payment was not found in database after creation', [
+                            'payment_id' => $payment->id,
+                        ]);
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Payment was created but could not be verified in database',
+                        ], 500);
+                    }
+                    
+                    Log::info('Payment created and completed successfully', [
+                        'payment_id' => $payment->id,
+                        'status' => $payment->payment_status,
+                        'payment_method' => $payment->payment_method,
+                        'total_amount' => $payment->total_amount,
+                        'payment_date' => $payment->payment_date,
+                        'verified_in_db' => $savedPayment !== null,
                     ]);
 
-                    $payment->load(['vehicle.province', 'fiscalYear']);
+                    // Ensure payment data is properly formatted
+                    // Helper function to format date safely (handles both Carbon and string)
+                    $formatDate = function($date) {
+                        if (!$date) {
+                            return null;
+                        }
+                        if ($date instanceof \Carbon\Carbon) {
+                            return $date->format('Y-m-d H:i:s');
+                        }
+                        // If it's already a string, return as-is or format if needed
+                        if (is_string($date)) {
+                            try {
+                                return \Carbon\Carbon::parse($date)->format('Y-m-d H:i:s');
+                            } catch (\Exception $e) {
+                                return $date; // Return as-is if parsing fails
+                            }
+                        }
+                        return null;
+                    };
+                    
+                    $paymentData = [
+                        'id' => $payment->id,
+                        'user_id' => $payment->user_id,
+                        'vehicle_id' => $payment->vehicle_id,
+                        'fiscal_year_id' => $payment->fiscal_year_id,
+                        'tax_amount' => $payment->tax_amount,
+                        'renewal_fee' => $payment->renewal_fee,
+                        'penalty_amount' => $payment->penalty_amount,
+                        'insurance_amount' => $payment->insurance_amount,
+                        'total_amount' => $payment->total_amount,
+                        'payment_status' => $payment->payment_status,
+                        'payment_method' => $payment->payment_method,
+                        'transaction_id' => $payment->transaction_id,
+                        'payment_date' => $formatDate($payment->payment_date),
+                        'created_at' => $formatDate($payment->created_at),
+                    ];
 
                     return response()->json([
                         'success' => true,
-                        'message' => 'Payment initialized. Please complete the payment.',
-                        'data' => $payment,
-                        'khalti' => [
-                            'pidx' => $khaltiResponse['pidx'],
-                            'payment_url' => $khaltiResponse['payment_url'],
-                        ],
+                        'message' => 'Payment record created. You can proceed with service request.',
+                        'data' => $paymentData,
                     ], 201);
-                } else {
-                    // If Khalti initialization fails, still return payment record
+                } catch (\Exception $e) {
+                    DB::rollBack();
+                    Log::error('Error updating payment status for COD', [
+                        'payment_id' => $payment->id ?? null,
+                        'error' => $e->getMessage(),
+                    ]);
                     return response()->json([
                         'success' => false,
-                        'message' => $khaltiResponse['message'] ?? 'Failed to initialize Khalti payment',
-                        'data' => $payment,
-                    ], 400);
+                        'message' => 'Failed to update payment status: ' . $e->getMessage(),
+                    ], 500);
                 }
             }
 
+            // If payment method is Khalti, initiate payment (DISABLED for now)
+            if ($request->payment_method === 'khalti') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Khalti payment is currently disabled. Please use Cash on Delivery.',
+                ], 400);
+            }
+
+            // Commit transaction for other payment methods
+            DB::commit();
+            
+            $payment->refresh();
             $payment->load(['vehicle.province', 'fiscalYear']);
 
             return response()->json([
@@ -156,10 +302,16 @@ class PaymentController extends Controller
                 'data' => $payment,
             ], 201);
         } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Payment creation failed', [
+                'user_id' => $request->user()->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return response()->json([
                 'success' => false,
-                'message' => $e->getMessage(),
-            ], 400);
+                'message' => 'Payment creation failed: ' . $e->getMessage(),
+            ], 500);
         }
     }
 
@@ -276,6 +428,9 @@ class PaymentController extends Controller
                 'last_renewed_date' => $fiscalYear->end_date,
             ]);
 
+            // Note: Renewal request will be created from Android app after payment verification
+            // This keeps the payment and request creation separate as requested
+            
             $payment->load(['vehicle.province', 'fiscalYear']);
 
             return response()->json([

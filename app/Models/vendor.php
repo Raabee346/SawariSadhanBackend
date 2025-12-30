@@ -18,6 +18,7 @@ class Vendor extends Authenticatable
         'email',
         'password',
         'email_verified_at',
+        'fcm_token',
     ];
 
     protected $hidden = [
