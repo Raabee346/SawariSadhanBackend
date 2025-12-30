@@ -70,6 +70,16 @@ class VendorProfileController extends Controller
         $vendor = $request->user();
         $data = $request->except(['profile_picture', 'license_document', 'vehicle_rc_document', 'insurance_document', 'citizenship_document', 'pan_document']);
 
+        // Convert service_radius from kilometers to meters before saving
+        // Android sends radius in kilometers, but database stores in meters
+        if (isset($data['service_radius'])) {
+            $serviceRadiusKm = (int) $data['service_radius'];
+            $data['service_radius'] = $serviceRadiusKm * 1000; // Convert kilometers to meters
+        } else {
+            // Default to 50km (50000 meters) if not provided
+            $data['service_radius'] = 50000;
+        }
+
         // Handle profile picture upload
         if ($request->hasFile('profile_picture')) {
             $data['profile_picture'] = $this->uploadFile($request->file('profile_picture'), 'profiles/vendors', 'vendor_' . $vendor->id . '_profile');
@@ -164,7 +174,7 @@ class VendorProfileController extends Controller
         $validator = Validator::make($request->all(), [
             'service_latitude' => 'required|numeric|between:-90,90',
             'service_longitude' => 'required|numeric|between:-180,180',
-            'service_radius' => 'required|integer|min:1|max:50000', // Reduced minimum from 100 to 1 (in km)
+            'service_radius' => 'nullable|integer|min:1|max:50000', // Optional, defaults to 50km
             'service_address' => 'nullable|string',
         ]);
 
@@ -174,9 +184,19 @@ class VendorProfileController extends Controller
 
         $vendor = $request->user();
         
+        // Default service radius to 50km if not provided
+        // Android sends radius in kilometers, but database stores in meters
+        $serviceRadiusKm = $request->input('service_radius', 50);
+        $serviceRadiusMeters = $serviceRadiusKm * 1000; // Convert kilometers to meters
+        
         $profile = $vendor->profile()->updateOrCreate(
             ['vendor_id' => $vendor->id],
-            $request->only(['service_latitude', 'service_longitude', 'service_radius', 'service_address'])
+            [
+                'service_latitude' => $request->service_latitude,
+                'service_longitude' => $request->service_longitude,
+                'service_radius' => $serviceRadiusMeters, // Store in meters
+                'service_address' => $request->input('service_address'),
+            ]
         );
 
         return response()->json([

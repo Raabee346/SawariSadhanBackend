@@ -1,0 +1,489 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\User;
+use App\Models\Vendor;
+use Illuminate\Support\Facades\Log;
+use Kreait\Firebase\Messaging\CloudMessage;
+use Kreait\Laravel\Firebase\Facades\Firebase;
+
+class FCMNotificationService
+{
+    protected $messaging;
+    protected $isAvailable = false;
+
+    public function __construct()
+    {
+        try {
+            // Check if Firebase classes are available
+            $firebaseFacadeClass = 'Kreait\Laravel\Firebase\Facades\Firebase';
+            $cloudMessageClass = 'Kreait\Firebase\Messaging\CloudMessage';
+            
+            if (class_exists($firebaseFacadeClass) && class_exists($cloudMessageClass)) {
+                try {
+                    // Get credentials path from config or environment
+                    $credentialsPath = config('firebase.credentials.file');
+                    
+                    // Also check GOOGLE_APPLICATION_CREDENTIALS environment variable
+                    if (empty($credentialsPath) || !file_exists($credentialsPath)) {
+                        $credentialsPath = env('GOOGLE_APPLICATION_CREDENTIALS');
+                    }
+                    
+                    // Fallback to default path
+                    if (empty($credentialsPath) || !file_exists($credentialsPath)) {
+                        $credentialsPath = base_path('storage/app/firebase/sawarisewa-34f2e-firebase-adminsdk-fbsvc-1bbe5f1da9.json');
+                    }
+                    
+                    // Check if credentials file exists
+                    if (!file_exists($credentialsPath)) {
+                        Log::error('Firebase credentials file not found', [
+                            'path' => $credentialsPath,
+                            'resolved_path' => realpath($credentialsPath) ?: 'file does not exist',
+                            'config_path' => config('firebase.credentials.file'),
+                            'env_path' => env('GOOGLE_APPLICATION_CREDENTIALS')
+                        ]);
+                        $this->isAvailable = false;
+                        return;
+                    }
+                    
+                    // Verify credentials file is readable
+                    if (!is_readable($credentialsPath)) {
+                        Log::error('Firebase credentials file is not readable', ['path' => $credentialsPath]);
+                        $this->isAvailable = false;
+                        return;
+                    }
+                    
+                    // Try to read project ID from credentials file
+                    $credentialsContent = file_get_contents($credentialsPath);
+                    $credentials = json_decode($credentialsContent, true);
+                    
+                    if (!$credentials) {
+                        Log::error('Firebase credentials file is not valid JSON', ['path' => $credentialsPath]);
+                        $this->isAvailable = false;
+                        return;
+                    }
+                    
+                    // Get project ID from credentials file or config
+                    $projectId = $credentials['project_id'] ?? config('firebase.project_id', 'sawarisewa-34f2e');
+                    
+                    if (empty($projectId)) {
+                        Log::error('Firebase project_id not found in credentials file or config', [
+                            'path' => $credentialsPath,
+                            'has_project_id_in_file' => isset($credentials['project_id']),
+                            'config_project_id' => config('firebase.project_id')
+                        ]);
+                        $this->isAvailable = false;
+                        return;
+                    }
+                    
+                    // Set GOOGLE_APPLICATION_CREDENTIALS environment variable if not set
+                    // This helps the Firebase SDK find the credentials
+                    if (!env('GOOGLE_APPLICATION_CREDENTIALS')) {
+                        putenv('GOOGLE_APPLICATION_CREDENTIALS=' . $credentialsPath);
+                    }
+                    
+                    Log::info('Firebase credentials loaded', [
+                        'project_id' => $projectId,
+                        'credentials_path' => $credentialsPath,
+                        'file_exists' => file_exists($credentialsPath),
+                        'file_readable' => is_readable($credentialsPath)
+                    ]);
+                    
+                    // Initialize Firebase messaging
+                    // The package should automatically read from GOOGLE_APPLICATION_CREDENTIALS or config
+                    $firebase = \Kreait\Laravel\Firebase\Facades\Firebase::messaging();
+                    $this->messaging = $firebase;
+                    $this->isAvailable = true;
+                    Log::info('Firebase FCM initialized successfully', ['project_id' => $projectId]);
+                } catch (\Exception $e) {
+                    Log::error('Firebase messaging initialization failed', [
+                        'error' => $e->getMessage(),
+                        'class' => get_class($e),
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                    $this->isAvailable = false;
+                }
+            } else {
+                Log::warning('Firebase classes not found. FCM notifications will be disabled. Make sure kreait/laravel-firebase is installed and service provider is registered.');
+                $this->isAvailable = false;
+            }
+        } catch (\Exception $e) {
+            Log::error('FCMNotificationService constructor error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            $this->isAvailable = false;
+        }
+    }
+
+    /**
+     * Send notification to a single user
+     */
+    public function sendToUser(User $user, string $title, string $body, array $data = [])
+    {
+        if (!$this->isAvailable) {
+            Log::debug("FCM not available, skipping notification to user {$user->id}");
+            return false;
+        }
+
+        if (!$user->fcm_token) {
+            Log::warning("No FCM token found for user {$user->id}");
+            return false;
+        }
+
+        try {
+            $message = \Kreait\Firebase\Messaging\CloudMessage::withTarget('token', $user->fcm_token)
+                ->withNotification(\Kreait\Firebase\Messaging\Notification::create($title, $body))
+                ->withData($data);
+
+            $this->messaging->send($message);
+            Log::info("FCM notification sent to user {$user->id}");
+            return true;
+        } catch (\Exception $e) {
+            Log::error("Failed to send FCM notification to user {$user->id}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Send notification to multiple users (vendors)
+     */
+    public function sendToMultipleUsers(array $userIds, string $title, string $body, array $data = [])
+    {
+        $users = User::whereIn('id', $userIds)
+            ->whereNotNull('fcm_token')
+            ->get();
+
+        $successCount = 0;
+        foreach ($users as $user) {
+            if ($this->sendToUser($user, $title, $body, $data)) {
+                $successCount++;
+            }
+        }
+
+        Log::info("Sent FCM notifications to {$successCount} out of " . count($users) . " users");
+        return $successCount;
+    }
+
+    /**
+     * Send notification to all online vendors
+     * Queries both User and Vendor models
+     */
+    public function sendToOnlineVendors(string $title, string $body, array $data = [])
+    {
+        // Get vendors from Vendor model
+        $vendors = Vendor::whereHas('profile', function ($query) {
+            $query->where('is_online', true)
+                  ->where('is_available', true);
+        })
+        ->whereNotNull('fcm_token')
+        ->get();
+
+        $successCount = 0;
+        foreach ($vendors as $vendor) {
+            if ($this->sendToVendor($vendor, $title, $body, $data)) {
+                $successCount++;
+            }
+        }
+
+        Log::info("Sent FCM notifications to {$successCount} online vendors");
+        return $successCount;
+    }
+    
+    /**
+     * Send notification to a vendor (Vendor model)
+     */
+    public function sendToVendor(Vendor $vendor, string $title, string $body, array $data = [])
+    {
+        if (!$this->isAvailable) {
+            Log::debug("FCM not available, skipping notification to vendor {$vendor->id}");
+            return false;
+        }
+
+        if (!$vendor->fcm_token) {
+            Log::warning("No FCM token found for vendor {$vendor->id}");
+            return false;
+        }
+
+        try {
+            $message = \Kreait\Firebase\Messaging\CloudMessage::withTarget('token', $vendor->fcm_token)
+                ->withNotification(\Kreait\Firebase\Messaging\Notification::create($title, $body))
+                ->withData($data);
+
+            $this->messaging->send($message);
+            Log::info("FCM notification sent to vendor {$vendor->id}");
+            return true;
+        } catch (\Exception $e) {
+            Log::error("Failed to send FCM notification to vendor {$vendor->id}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Send notification to a topic (broadcast)
+     */
+    public function sendToTopic(string $topic, string $title, string $body, array $data = [])
+    {
+        if (!$this->isAvailable) {
+            Log::debug("FCM not available, skipping notification to topic {$topic}");
+            return false;
+        }
+
+        try {
+            $message = \Kreait\Firebase\Messaging\CloudMessage::withTarget('topic', $topic)
+                ->withNotification(\Kreait\Firebase\Messaging\Notification::create($title, $body))
+                ->withData($data);
+
+            $this->messaging->send($message);
+            Log::info("FCM notification sent to topic: {$topic}");
+            return true;
+        } catch (\Exception $e) {
+            Log::error("Failed to send FCM notification to topic {$topic}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Send renewal request notification to vendors
+     * Sends to ALL vendors (online and offline) so they get notified even when not in app
+     */
+    public function sendNewRenewalRequest($renewalRequest)
+    {
+        if (!$this->isAvailable) {
+            Log::warning('FCM not available, skipping renewal request notification', [
+                'renewal_request_id' => $renewalRequest->id ?? null,
+            ]);
+            return false;
+        }
+
+        try {
+            // Ensure vehicle relationship is loaded
+            if (!$renewalRequest->relationLoaded('vehicle')) {
+                $renewalRequest->load('vehicle');
+            }
+            
+            $vehicleNumber = $renewalRequest->vehicle ? $renewalRequest->vehicle->registration_number : 'Unknown';
+            $title = "New Bluebook Renewal Request";
+            $body = "New request for {$vehicleNumber}";
+            
+            // Handle pickup_date - it might be a Carbon instance, date string, or string
+            $pickupDateFormatted = $renewalRequest->pickup_date;
+            if ($pickupDateFormatted instanceof \Carbon\Carbon) {
+                $pickupDateFormatted = $pickupDateFormatted->format('Y-m-d');
+            } elseif (is_string($pickupDateFormatted)) {
+                // If it's already a string in YYYY-MM-DD format, use it as-is
+                // If it's in another format, try to parse it
+                try {
+                    $pickupDateFormatted = \Carbon\Carbon::parse($pickupDateFormatted)->format('Y-m-d');
+                } catch (\Exception $e) {
+                    // If parsing fails, use the string as-is
+                    $pickupDateFormatted = $renewalRequest->pickup_date;
+                }
+            } else {
+                // Fallback: try to convert to string
+                $pickupDateFormatted = (string) $renewalRequest->pickup_date;
+            }
+            
+            $data = [
+                'type' => 'new_renewal_request',
+                'renewal_request_id' => (string) $renewalRequest->id,
+                'vehicle_id' => (string) $renewalRequest->vehicle_id,
+                'pickup_address' => $renewalRequest->pickup_address,
+                'pickup_date' => $pickupDateFormatted,
+                'total_amount' => (string) $renewalRequest->total_amount,
+            ];
+
+            Log::info('Sending FCM notification for new renewal request', [
+                'renewal_request_id' => $renewalRequest->id,
+                'vehicle_number' => $vehicleNumber,
+            ]);
+
+            // Get renewal request location
+            $requestLat = $renewalRequest->pickup_latitude;
+            $requestLng = $renewalRequest->pickup_longitude;
+            
+            $topicSent = false;
+            $successCount = 0;
+            
+            if (!$requestLat || !$requestLng) {
+                Log::warning('Renewal request missing pickup coordinates, sending to all vendors via topic', [
+                    'renewal_request_id' => $renewalRequest->id,
+                ]);
+                // If no coordinates, send to all vendors via topic (fallback only)
+                $topicSent = $this->sendToTopic('vendors', $title, $body, $data);
+            } else {
+                // Filter vendors by service area radius - ONLY send to vendors within radius
+                $vendors = $this->getVendorsWithinRadius($requestLat, $requestLng);
+                
+                Log::info('Filtered vendors by service area radius', [
+                    'renewal_request_id' => $renewalRequest->id,
+                    'request_lat' => $requestLat,
+                    'request_lng' => $requestLng,
+                    'vendors_count' => $vendors->count(),
+                ]);
+                
+                // Send individual notifications only to vendors within service radius
+                foreach ($vendors as $vendor) {
+                    if ($this->sendToVendor($vendor, $title, $body, $data)) {
+                        $successCount++;
+                        Log::debug('FCM notification sent to vendor', [
+                            'vendor_id' => $vendor->id,
+                            'renewal_request_id' => $renewalRequest->id,
+                        ]);
+                    }
+                }
+                
+                // DO NOT send to topic when we have location - only send to filtered vendors
+                // This ensures location-based filtering works correctly
+            }
+
+            Log::info('FCM notification sent for renewal request', [
+                'renewal_request_id' => $renewalRequest->id,
+                'request_lat' => $requestLat,
+                'request_lng' => $requestLng,
+                'vendors_notified' => $successCount,
+                'topic_sent' => $topicSent,
+                'has_location' => !empty($requestLat) && !empty($requestLng),
+            ]);
+
+            return $successCount > 0 || $topicSent;
+        } catch (\Exception $e) {
+            Log::error('Error sending FCM notification for renewal request', [
+                'renewal_request_id' => $renewalRequest->id ?? null,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Get vendors within service radius of a location
+     * Uses Haversine formula to calculate distance
+     */
+    private function getVendorsWithinRadius($latitude, $longitude)
+    {
+        // Get all vendors with FCM tokens and service area set
+        $vendors = \App\Models\Vendor::whereNotNull('fcm_token')
+            ->whereHas('profile', function ($query) {
+                $query->whereNotNull('service_latitude')
+                      ->whereNotNull('service_longitude')
+                      ->whereNotNull('service_radius');
+            })
+            ->with('profile')
+            ->get();
+        
+        $vendorsWithinRadius = collect();
+        
+        foreach ($vendors as $vendor) {
+            $profile = $vendor->profile;
+            if (!$profile) continue;
+            
+            $vendorLat = $profile->service_latitude;
+            $vendorLng = $profile->service_longitude;
+            // service_radius is stored in meters, convert to kilometers for comparison
+            $radiusMeters = $profile->service_radius ?? 50000; // Default 50000 meters = 50km
+            $radius = $radiusMeters / 1000; // Convert meters to kilometers
+            
+            if (!$vendorLat || !$vendorLng) continue;
+            
+            // Calculate distance using Haversine formula (returns kilometers)
+            $distance = $this->calculateDistance($latitude, $longitude, $vendorLat, $vendorLng);
+            
+            // Check if request location is within vendor's service radius (both in kilometers)
+            if ($distance <= $radius) {
+                $vendorsWithinRadius->push($vendor);
+                Log::info('Vendor within service radius - will receive notification', [
+                    'vendor_id' => $vendor->id,
+                    'request_lat' => $latitude,
+                    'request_lng' => $longitude,
+                    'vendor_lat' => $vendorLat,
+                    'vendor_lng' => $vendorLng,
+                    'distance_km' => round($distance, 2),
+                    'service_radius_km' => $radius,
+                    'service_radius_meters' => $radiusMeters,
+                ]);
+            } else {
+                Log::info('Vendor outside service radius - will NOT receive notification', [
+                    'vendor_id' => $vendor->id,
+                    'request_lat' => $latitude,
+                    'request_lng' => $longitude,
+                    'vendor_lat' => $vendorLat,
+                    'vendor_lng' => $vendorLng,
+                    'distance_km' => round($distance, 2),
+                    'service_radius_km' => $radius,
+                    'service_radius_meters' => $radiusMeters,
+                ]);
+            }
+        }
+        
+        return $vendorsWithinRadius;
+    }
+    
+    /**
+     * Calculate distance between two points using Haversine formula
+     * Returns distance in kilometers
+     */
+    private function calculateDistance($lat1, $lon1, $lat2, $lon2)
+    {
+        $earthRadius = 6371; // Earth's radius in kilometers
+        
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLon = deg2rad($lon2 - $lon1);
+        
+        $a = sin($dLat / 2) * sin($dLat / 2) +
+             cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
+             sin($dLon / 2) * sin($dLon / 2);
+        
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+        
+        return $earthRadius * $c;
+    }
+
+    /**
+     * Notify vendors that request was accepted by another vendor
+     * NOTE: This is now DISABLED - we don't notify other vendors when request is accepted
+     * They will simply see the request disappear from their available list
+     */
+    public function notifyRequestAcceptedByOther($renewalRequest)
+    {
+        // DO NOT send notifications to other vendors
+        // The request will automatically disappear from their available requests list
+        // This prevents notification spam and confusion
+        return 0;
+    }
+
+    /**
+     * Notify user about request status update
+     */
+    public function notifyUserRequestUpdate($renewalRequest, string $status)
+    {
+        $user = $renewalRequest->user;
+        
+        $titles = [
+            'assigned' => 'Request Assigned',
+            'in_progress' => 'Service Started',
+            'completed' => 'Service Completed',
+            'cancelled' => 'Request Cancelled',
+        ];
+
+        $bodies = [
+            'assigned' => "A rider has accepted your renewal request",
+            'in_progress' => "Rider has started processing your renewal",
+            'completed' => "Your bluebook renewal has been completed",
+            'cancelled' => "Your renewal request has been cancelled",
+        ];
+
+        $title = $titles[$status] ?? 'Request Update';
+        $body = $bodies[$status] ?? "Your request status has been updated to {$status}";
+
+        $data = [
+            'type' => 'renewal_request_update',
+            'renewal_request_id' => (string) $renewalRequest->id,
+            'status' => $status,
+        ];
+
+        return $this->sendToUser($user, $title, $body, $data);
+    }
+}

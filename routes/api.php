@@ -7,6 +7,7 @@ use App\Http\Controllers\VendorProfileController;
 use App\Http\Controllers\VehicleController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\FiscalYearController;
+use App\Http\Controllers\RenewalRequestController;
 
 // Authentication Routes
 Route::post('/register', [AuthController::class, 'register']);
@@ -46,6 +47,26 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/{id}/status', [PaymentController::class, 'updateStatus']);
         Route::post('/{id}/verify-khalti', [PaymentController::class, 'verifyKhaltiPayment']);
     });
+
+    // Vendor Renewal Request Routes (must come before customer routes to avoid route conflicts)
+    Route::prefix('renewal-requests')->middleware('vendor')->group(function () {
+        Route::get('/available', [RenewalRequestController::class, 'getAvailable']);
+        Route::get('/my-requests', [RenewalRequestController::class, 'getVendorRequests']);
+        Route::post('/{id}/accept', [RenewalRequestController::class, 'accept']);
+        Route::post('/{id}/decline', [RenewalRequestController::class, 'decline']);
+    });
+
+    // Renewal Request Routes (customer routes - wildcard routes come after specific vendor routes)
+    Route::prefix('renewal-requests')->middleware('customer')->group(function () {
+        Route::get('/', [RenewalRequestController::class, 'index']);
+        Route::get('/in-progress', [RenewalRequestController::class, 'getInProgress']);
+        Route::post('/', [RenewalRequestController::class, 'store']);
+        Route::get('/{id}', [RenewalRequestController::class, 'show']);
+        Route::put('/{id}/status', [RenewalRequestController::class, 'updateStatus']);
+    });
+
+    // FCM Token Update (available to both users and vendors)
+    Route::post('/fcm-token', [RenewalRequestController::class, 'updateFcmToken']);
     // Vendor Profile Routes
     Route::prefix('vendor')->middleware('vendor')->group(function () {
         Route::get('/profile', [VendorProfileController::class, 'show']);

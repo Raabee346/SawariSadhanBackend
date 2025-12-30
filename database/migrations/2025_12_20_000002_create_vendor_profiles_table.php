@@ -44,7 +44,7 @@ return new class extends Migration
             // Service Area
             $table->decimal('service_latitude', 10, 8)->nullable();
             $table->decimal('service_longitude', 11, 8)->nullable();
-            $table->integer('service_radius')->default(5000); // in meters
+            $table->integer('service_radius')->default(50000); // in meters (50000 = 50km)
             $table->text('service_address')->nullable();
             
             // Status & Verification
