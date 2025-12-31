@@ -4,9 +4,11 @@ namespace App\Filament\Resources\VehicleResource\Pages;
 
 use App\Filament\Resources\VehicleResource;
 use App\Services\NepalDateService;
+use App\Services\FCMNotificationService;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\ViewAction;
 use Filament\Resources\Pages\EditRecord;
+use Illuminate\Support\Facades\Log;
 
 class EditVehicle extends EditRecord
 {
@@ -45,5 +47,32 @@ class EditVehicle extends EditRecord
         }
 
         return $data;
+    }
+
+    protected function afterSave(): void
+    {
+        // Check if verification status was changed to approved or rejected
+        $this->record->refresh();
+        $newStatus = $this->record->verification_status;
+        
+        // Get the original status before save (we need to check if it changed)
+        // Since we can't easily get the old value here, we'll send notification if status is approved/rejected
+        // The notification service will handle duplicate prevention if needed
+        if (in_array($newStatus, ['approved', 'rejected'])) {
+            try {
+                $fcmService = app(FCMNotificationService::class);
+                $fcmService->notifyVehicleVerification($this->record, $newStatus);
+                Log::info('Vehicle verification notification sent from EditVehicle', [
+                    'vehicle_id' => $this->record->id,
+                    'user_id' => $this->record->user_id,
+                    'status' => $newStatus,
+                ]);
+            } catch (\Exception $e) {
+                Log::error('Failed to send vehicle verification notification from EditVehicle', [
+                    'vehicle_id' => $this->record->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 }

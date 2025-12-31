@@ -11,7 +11,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Auth\AuthenticationException;
 
 class PaymentController extends Controller
 {
@@ -45,51 +47,75 @@ class PaymentController extends Controller
      */
     public function store(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'vehicle_id' => 'required|exists:vehicles,id',
-            'fiscal_year_id' => 'required|exists:fiscal_years,id',
-            'payment_method' => 'required|string|in:esewa,khalti,bank_transfer,cash,cash_on_delivery',
-            'include_insurance' => 'nullable|boolean', // true = include insurance, false = user has valid insurance (no insurance fee)
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation error',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $vehicle = Vehicle::where('user_id', $request->user()->id)
-            ->findOrFail($request->vehicle_id);
-
-        if (!$vehicle->isVerified()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Vehicle must be verified before payment',
-            ], 403);
-        }
-
-        DB::beginTransaction();
         try {
-            Log::info('Creating payment', [
-                'user_id' => $request->user()->id,
-                'vehicle_id' => $request->vehicle_id,
-                'fiscal_year_id' => $request->fiscal_year_id,
-                'payment_method' => $request->payment_method,
-                'include_insurance' => $request->input('include_insurance'),
+            // Check if user is authenticated
+            $user = $request->user();
+            if (!$user) {
+                Log::error('Payment creation failed: User not authenticated', [
+                    'has_token' => $request->bearerToken() !== null,
+                    'token_preview' => $request->bearerToken() ? substr($request->bearerToken(), 0, 20) . '...' : null,
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid token. Please login again.',
+                ], 401);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'vehicle_id' => 'required|exists:vehicles,id',
+                'fiscal_year_id' => 'required|exists:fiscal_years,id',
+                'payment_method' => 'required|string|in:esewa,khalti,bank_transfer,cash,cash_on_delivery',
+                'include_insurance' => 'nullable|boolean', // true = include insurance, false = user has valid insurance (no insurance fee)
             ]);
-            
-            // Calculate tax and insurance
-            // include_insurance: true = user wants insurance, false = user has valid insurance (no insurance fee)
-            $includeInsurance = $request->input('include_insurance', true); // Default to true for backward compatibility
-            
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation error',
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
             try {
-                $calculation = $this->taxCalculationService->calculate($vehicle, $request->fiscal_year_id, $includeInsurance);
-            } catch (\Exception $e) {
-                DB::rollBack();
-                Log::error('Tax calculation failed', [
-                    'user_id' => $request->user()->id,
+                $vehicle = Vehicle::where('user_id', $user->id)
+                    ->findOrFail($request->vehicle_id);
+            } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+                Log::error('Payment creation failed: Vehicle not found', [
+                    'vehicle_id' => $request->vehicle_id,
+                    'user_id' => $user->id,
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Vehicle not found or you do not have permission to access it.',
+                ], 404);
+            }
+            if (!$vehicle->isVerified()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Vehicle must be verified before payment',
+                ], 403);
+            }
+
+            DB::beginTransaction();
+            try {
+                Log::info('Creating payment', [
+                    'user_id' => $user->id,
+                    'vehicle_id' => $request->vehicle_id,
+                    'fiscal_year_id' => $request->fiscal_year_id,
+                    'payment_method' => $request->payment_method,
+                    'include_insurance' => $request->input('include_insurance'),
+                ]);
+                
+                // Calculate tax and insurance
+                // include_insurance: true = user wants insurance, false = user has valid insurance (no insurance fee)
+                $includeInsurance = $request->input('include_insurance', true); // Default to true for backward compatibility
+                
+                try {
+                    $calculation = $this->taxCalculationService->calculate($vehicle, $request->fiscal_year_id, $includeInsurance);
+                } catch (\Exception $e) {
+                    DB::rollBack();
+                    Log::error('Tax calculation failed', [
+                        'user_id' => $user->id,
                     'vehicle_id' => $vehicle->id,
                     'fiscal_year_id' => $request->fiscal_year_id,
                     'error' => $e->getMessage(),
@@ -107,42 +133,53 @@ class PaymentController extends Controller
 
             if (!$yearCalculation) {
                 DB::rollBack();
+                // Log available fiscal years for debugging
+                $availableFiscalYears = collect($calculation['calculations'])
+                    ->pluck('fiscal_year_id')
+                    ->toArray();
+                
                 Log::error('Calculation not found for fiscal year', [
-                    'fiscal_year_id' => $request->fiscal_year_id,
-                    'user_id' => $request->user()->id,
+                    'requested_fiscal_year_id' => $request->fiscal_year_id,
+                    'available_fiscal_year_ids' => $availableFiscalYears,
+                    'calculations_count' => count($calculation['calculations']),
+                    'user_id' => $user->id,
+                    'vehicle_id' => $request->vehicle_id,
                 ]);
+                
                 return response()->json([
                     'success' => false,
-                    'message' => 'Calculation not found for the specified fiscal year',
+                    'message' => 'Calculation not found for the specified fiscal year. Available fiscal years: ' . implode(', ', $availableFiscalYears),
                 ], 404);
             }
 
-            // Calculate amounts matching Android calculation exactly
-            // Android calculation (PaymentSummaryActivity.java):
-            // - Service Fee = renewalFee + penalties (or 500 if 0)
-            // - Subtotal = roadTax + insurance + serviceFee
-            // - VAT = subtotal * 0.13
-            // - Grand Total = subtotal + VAT
+            // Calculate amounts matching TaxCalculationService logic:
+            // - Service Fee = 600 default (not calculated from renewal fee + penalty)
+            // - VAT = 13% on service fee only (not on other fees)
+            // - Total Amount = tax + insurance + renewal_fee + penalty + service_fee + VAT
             
             $taxAmount = (float) $yearCalculation['tax_amount'];
             $insuranceAmount = (float) $yearCalculation['insurance_amount'];
             $renewalFee = (float) $yearCalculation['renewal_fee'];
-            $penaltyAmount = (float) ($yearCalculation['penalty_amount'] + $yearCalculation['renewal_fee_penalty']);
+            $penaltyAmountFromTax = (float) $yearCalculation['penalty_amount'];
+            $renewalFeePenalty = (float) ($yearCalculation['renewal_fee_penalty'] ?? 0);
+            $penaltyAmount = $penaltyAmountFromTax + $renewalFeePenalty;
             
-            // Service fee = renewal fee + penalties (or 500 if 0) - matching Android logic
-            $serviceFee = $renewalFee + $penaltyAmount;
-            if ($serviceFee <= 0) {
-                $serviceFee = 500.0; // Default service fee
-            }
+            // Log penalty breakdown for debugging
+            Log::info('Penalty calculation in payment', [
+                'penalty_amount_from_tax' => $penaltyAmountFromTax,
+                'renewal_fee_penalty' => $renewalFeePenalty,
+                'total_penalty_amount' => $penaltyAmount,
+                'days_delayed' => $yearCalculation['days_delayed'] ?? 0,
+            ]);
             
-            // Subtotal = tax + insurance + service fee (matching Android)
-            $subtotal = $taxAmount + $insuranceAmount + $serviceFee;
+            // Service fee = 600 default (matching TaxCalculationService)
+            $serviceFee = 600.0;
             
-            // VAT = 13% on subtotal (matching Android)
-            $vatAmount = round($subtotal * 0.13, 2);
+            // VAT = 13% on service fee only (not on other fees)
+            $vatAmount = round($serviceFee * 0.13, 2);
             
-            // Grand total = subtotal + VAT (matching Android)
-            $grandTotal = round($subtotal + $vatAmount, 2);
+            // Total amount = tax + insurance + renewal_fee + penalty + service_fee + VAT (on service fee only)
+            $grandTotal = round($taxAmount + $insuranceAmount + $renewalFee + $penaltyAmount + $serviceFee + $vatAmount, 2);
 
             // Create payment record
             $transactionId = 'TXN-' . strtoupper(Str::random(12));
@@ -155,20 +192,19 @@ class PaymentController extends Controller
                 'insurance_amount' => $insuranceAmount,
                 'service_fee' => $serviceFee,
                 'vat_amount' => $vatAmount,
-                'subtotal' => $subtotal,
                 'grand_total' => $grandTotal,
             ]);
             
             try {
                 $payment = Payment::create([
-                    'user_id' => $request->user()->id,
+                    'user_id' => $user->id,
                     'vehicle_id' => $vehicle->id,
                     'fiscal_year_id' => $request->fiscal_year_id,
                     'tax_amount' => $taxAmount,
                     'renewal_fee' => $renewalFee,
                     'penalty_amount' => $penaltyAmount,
                     'insurance_amount' => $insuranceAmount,
-                    'total_amount' => $grandTotal, // Save grand total (subtotal + VAT) matching Android
+                    'total_amount' => $grandTotal, // Save grand total (tax + insurance + renewal_fee + penalty + service_fee + VAT on service fee)
                     'payment_status' => 'pending',
                     'payment_method' => $request->payment_method,
                     'transaction_id' => $transactionId,
@@ -281,13 +317,213 @@ class PaymentController extends Controller
                 }
             }
 
-            // If payment method is Khalti, initiate payment (DISABLED for now)
+            // If payment method is Khalti, initiate payment
             if ($request->payment_method === 'khalti') {
-                DB::rollBack();
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Khalti payment is currently disabled. Please use Cash on Delivery.',
-                ], 400);
+                try {
+                    Log::info('Initializing Khalti payment', [
+                        'payment_id' => $payment->id,
+                        'amount' => $payment->total_amount,
+                    ]);
+                    
+                    // Initialize Khalti payment
+                    $amount = $payment->total_amount; // Amount in NPR
+                    $transactionId = 'PAYMENT_' . $payment->id;
+                    $productName = 'Vehicle Renewal Payment - ' . $vehicle->registration_number;
+                    
+                    // For KPG-2: Khalti API requires HTTP/HTTPS return_url
+                    // The SDK will handle redirects automatically if the backend callback redirects to deep link
+                    $returnUrl = config('services.khalti.return_url', '');
+                    
+                    // If return_url contains localhost or 127.0.0.1, replace with actual IP
+                    if (!empty($returnUrl) && (str_contains($returnUrl, '127.0.0.1') || str_contains($returnUrl, 'localhost'))) {
+                        // Replace localhost with the IP from Android app (192.168.18.50)
+                        $returnUrl = str_replace('127.0.0.1', '192.168.18.50', $returnUrl);
+                        $returnUrl = str_replace('localhost', '192.168.18.50', $returnUrl);
+                        Log::info('Replaced localhost in return_url with IP address', [
+                            'original' => config('services.khalti.return_url', ''),
+                            'updated' => $returnUrl,
+                        ]);
+                    }
+                    
+                    // If return_url is still empty or invalid, construct from request
+                    if (empty($returnUrl) || !preg_match('/^https?:\/\//', $returnUrl)) {
+                        $host = $request->getHost();
+                        $port = $request->getPort();
+                        
+                        if ($host === 'localhost' || $host === '127.0.0.1') {
+                            $host = '192.168.18.50'; // Use the same IP as Android app
+                        }
+                        
+                        $scheme = $request->getScheme();
+                        $portStr = ($port && $port != 80 && $port != 443) ? ":{$port}" : '';
+                        $returnUrl = "{$scheme}://{$host}{$portStr}/api/payments/khalti/callback";
+                        
+                        Log::info('Constructed return_url from request', [
+                            'host' => $host,
+                            'port' => $port,
+                            'return_url' => $returnUrl,
+                        ]);
+                    }
+                    
+                    // Note: KPG-2 SDK uses pidx directly and handles callbacks via OnPaymentResult
+                    // The return_url is mainly for webhook callbacks and web-based redirects
+                    // The SDK will automatically redirect to deep link if configured in callback handler
+                    
+                    $websiteUrl = config('services.khalti.website_url', '');
+                    // Fix website_url if it contains localhost
+                    if (!empty($websiteUrl) && (str_contains($websiteUrl, '127.0.0.1') || str_contains($websiteUrl, 'localhost'))) {
+                        $websiteUrl = str_replace('127.0.0.1', '192.168.18.50', $websiteUrl);
+                        $websiteUrl = str_replace('localhost', '192.168.18.50', $websiteUrl);
+                    }
+                    if (empty($websiteUrl) || !preg_match('/^https?:\/\//', $websiteUrl)) {
+                        $host = $request->getHost();
+                        if ($host === 'localhost' || $host === '127.0.0.1') {
+                            $host = '192.168.18.50';
+                        }
+                        $scheme = $request->getScheme();
+                        $port = $request->getPort();
+                        $portStr = ($port && $port != 80 && $port != 443) ? ":{$port}" : '';
+                        $websiteUrl = "{$scheme}://{$host}{$portStr}";
+                    }
+                    
+                    $additionalData = [
+                        'return_url' => $returnUrl,
+                        'website_url' => $websiteUrl,
+                    ];
+                    
+                    Log::info('Khalti payment return URL configured', [
+                        'return_url' => $returnUrl,
+                        'website_url' => $websiteUrl,
+                        'config_return_url' => config('services.khalti.return_url'),
+                        'config_website_url' => config('services.khalti.website_url'),
+                    ]);
+                    
+                    Log::info('Calling Khalti payment service', [
+                        'amount' => $amount,
+                        'transaction_id' => $transactionId,
+                        'product_name' => $productName,
+                    ]);
+                    
+                    $khaltiResponse = $this->khaltiPaymentService->initiatePayment(
+                        $amount,
+                        $transactionId,
+                        $productName,
+                        $additionalData
+                    );
+                    
+                    Log::info('Khalti payment service response', [
+                        'success' => $khaltiResponse['success'] ?? false,
+                        'has_pidx' => isset($khaltiResponse['pidx']),
+                        'response_keys' => array_keys($khaltiResponse),
+                    ]);
+                    
+                    // Check if response has pidx (from the 'data' key or directly)
+                    $pidx = null;
+                    if (isset($khaltiResponse['pidx'])) {
+                        $pidx = $khaltiResponse['pidx'];
+                    } elseif (isset($khaltiResponse['data']['pidx'])) {
+                        $pidx = $khaltiResponse['data']['pidx'];
+                    } elseif (isset($khaltiResponse['data']) && is_array($khaltiResponse['data']) && isset($khaltiResponse['data']['pidx'])) {
+                        $pidx = $khaltiResponse['data']['pidx'];
+                    }
+
+                    Log::info('Khalti response analysis', [
+                        'response_success' => $khaltiResponse['success'] ?? false,
+                        'has_pidx' => !empty($pidx),
+                        'pidx' => $pidx,
+                        'response_keys' => array_keys($khaltiResponse),
+                        'full_response' => $khaltiResponse,
+                    ]);
+
+                    if (!$khaltiResponse || !($khaltiResponse['success'] ?? false) || !$pidx) {
+                        DB::rollBack();
+                        Log::error('Khalti payment initialization failed', [
+                            'response' => $khaltiResponse,
+                            'has_pidx' => !empty($pidx),
+                            'response_success' => $khaltiResponse['success'] ?? false,
+                        ]);
+                        return response()->json([
+                            'success' => false,
+                            'message' => $khaltiResponse['message'] ?? 'Failed to initialize Khalti payment. Please check Khalti service configuration.',
+                        ], 500);
+                    }
+
+                    Log::info('Khalti payment initialized successfully', [
+                        'pidx' => $pidx,
+                        'payment_id' => $payment->id,
+                    ]);
+
+                    // Store pidx in payment record (if column exists)
+                    // Note: We'll store it in a JSON field or metadata if khalti_pidx column doesn't exist
+                    try {
+                        if (Schema::hasColumn('payments', 'khalti_pidx')) {
+                            $payment->khalti_pidx = $pidx;
+                            $payment->save();
+                        }
+                    } catch (\Exception $e) {
+                        // Column doesn't exist, that's okay - pidx will be returned in response
+                        Log::info('khalti_pidx column not found, storing pidx in response only');
+                    }
+
+                    DB::commit();
+
+                    Log::info('Payment committed, preparing response', [
+                        'payment_id' => $payment->id,
+                    ]);
+
+                    // Return response with Khalti data
+                    // Don't include full payment object if it causes issues, just essential data
+                    $responseData = [
+                        'success' => true,
+                        'message' => 'Khalti payment initialized. Please complete the payment.',
+                        'data' => [
+                            'id' => $payment->id,
+                            'total_amount' => $payment->total_amount,
+                            'payment_status' => $payment->payment_status,
+                            'payment_method' => $payment->payment_method,
+                        ],
+                        'khalti' => [
+                            'pidx' => $pidx,
+                            'payment_url' => $khaltiResponse['payment_url'] ?? null,
+                        ],
+                    ];
+                    
+                    Log::info('Returning Khalti payment response', [
+                        'payment_id' => $payment->id,
+                        'has_khalti_data' => isset($responseData['khalti']),
+                        'pidx' => $pidx,
+                    ]);
+                    
+                    // Return response - ensure it's returned before any outer catch can intercept
+                    try {
+                        return response()->json($responseData, 201);
+                    } catch (\Exception $returnException) {
+                        Log::error('Error returning Khalti payment response', [
+                            'error' => $returnException->getMessage(),
+                            'trace' => $returnException->getTraceAsString(),
+                        ]);
+                        // Even if JSON encoding fails, try to return a simple response
+                        return response()->json([
+                            'success' => true,
+                            'message' => 'Khalti payment initialized',
+                            'data' => ['id' => $payment->id],
+                            'khalti' => ['pidx' => $pidx],
+                        ], 201);
+                    }
+                } catch (\Exception $e) {
+                    DB::rollBack();
+                    Log::error('Error initializing Khalti payment', [
+                        'payment_id' => $payment->id ?? null,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                        'file' => $e->getFile(),
+                        'line' => $e->getLine(),
+                    ]);
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Failed to initialize Khalti payment: ' . $e->getMessage(),
+                    ], 500);
+                }
             }
 
             // Commit transaction for other payment methods
@@ -301,16 +537,54 @@ class PaymentController extends Controller
                 'message' => 'Payment record created. Please complete the payment.',
                 'data' => $payment,
             ], 201);
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Payment creation failed', [
-                'user_id' => $request->user()->id,
+            } catch (\Exception $e) {
+                DB::rollBack();
+                Log::error('Payment creation failed in inner catch', [
+                    'user_id' => isset($user) ? $user->id : null,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Payment creation failed: ' . $e->getMessage(),
+                ], 500);
+            }
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            // Handle authentication exceptions specifically
+            Log::error('Payment creation failed: Authentication exception', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
             ]);
             return response()->json([
                 'success' => false,
-                'message' => 'Payment creation failed: ' . $e->getMessage(),
+                'message' => 'Invalid token. Please login again.',
+            ], 401);
+        } catch (\Exception $e) {
+            // Log the full exception for debugging
+            Log::error('Payment creation failed: Exception in outer catch', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'exception_class' => get_class($e),
+            ]);
+            
+            // Only check for authentication errors if it's specifically an AuthenticationException
+            // Don't check for "token" in message as it might be a false positive
+            if ($e instanceof \Illuminate\Auth\AuthenticationException) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid token. Please login again.',
+                ], 401);
+            }
+            
+            // Check if user was authenticated at the start
+            // If we got here, it's likely a different error, not authentication
+            // Don't expose internal error details to client
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while processing your request. Please try again.',
             ], 500);
         }
     }
@@ -459,6 +733,7 @@ class PaymentController extends Controller
     /**
      * Khalti payment callback (webhook from Khalti server)
      * This is called by Khalti server after payment is completed
+     * For mobile apps, this redirects to the deep link
      */
     public function khaltiCallback(Request $request)
     {
@@ -480,10 +755,17 @@ class PaymentController extends Controller
         $verification = $this->khaltiPaymentService->verifyPayment($request->pidx);
 
         if ($verification['success']) {
-            // Find payment by transaction_id stored in payment_details
+            // Find payment by pidx stored in payment_details
             $payment = Payment::where('payment_method', 'khalti')
                 ->whereJsonContains('payment_details->pidx', $request->pidx)
                 ->first();
+
+            if (!$payment) {
+                // Try to find by pidx in khalti_pidx column if it exists
+                $payment = Payment::where('payment_method', 'khalti')
+                    ->where('khalti_pidx', $request->pidx)
+                    ->first();
+            }
 
             if ($payment && $payment->payment_status === 'pending') {
                 $payment->update([
@@ -500,20 +782,52 @@ class PaymentController extends Controller
                 // Update vehicle's last_renewed_date
                 $vehicle = $payment->vehicle;
                 $fiscalYear = $payment->fiscalYear;
-                $vehicle->update([
-                    'last_renewed_date' => $fiscalYear->end_date,
-                ]);
+                if ($vehicle && $fiscalYear) {
+                    $vehicle->update([
+                        'last_renewed_date' => $fiscalYear->end_date,
+                    ]);
+                }
             }
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Payment callback processed',
-            ]);
+            // For mobile apps, redirect to deep link
+            // Check if request is from mobile (User-Agent or Accept header)
+            $userAgent = $request->header('User-Agent', '');
+            $isMobile = str_contains(strtolower($userAgent), 'android') || 
+                       str_contains(strtolower($userAgent), 'iphone') ||
+                       str_contains(strtolower($userAgent), 'mobile');
+            
+            if ($isMobile || $request->expectsJson()) {
+                // Return JSON response for API calls
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Payment callback processed',
+                    'redirect_url' => 'sawarisewa://payment/callback?pidx=' . urlencode($request->pidx) . '&status=success',
+                ]);
+            }
+            
+            // For web browsers, redirect to deep link via HTML redirect
+            $deepLink = 'sawarisewa://payment/callback?pidx=' . urlencode($request->pidx) . '&status=success';
+            return response()->view('khalti-callback-redirect', [
+                'deepLink' => $deepLink,
+                'pidx' => $request->pidx,
+            ])->header('Content-Type', 'text/html');
         }
 
+        // Payment verification failed
+        $errorMessage = $verification['message'] ?? 'Payment verification failed';
+        
+        // For mobile, return JSON with error
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => false,
+                'message' => $errorMessage,
+            ], 400);
+        }
+        
+        // For web, show error page
         return response()->json([
             'success' => false,
-            'message' => 'Payment verification failed',
+            'message' => $errorMessage,
         ], 400);
     }
 }
