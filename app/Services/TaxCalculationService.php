@@ -83,6 +83,15 @@ class TaxCalculationService
             $totalInsurance += $yearCalculation['insurance_amount'];
         }
 
+        // Service fee = 600 default (not calculated from renewal fee + penalty)
+        $serviceFee = 600.0;
+        
+        // VAT = 13% on service fee only (not on other fees)
+        $vatAmount = round($serviceFee * 0.13, 2);
+        
+        // Total amount = tax + insurance + renewal_fee + penalty + service_fee + VAT (on service fee only)
+        $totalAmount = round($totalTax + $totalInsurance + $totalRenewalFee + $totalPenalty + $serviceFee + $vatAmount, 2);
+        
         return [
             'vehicle_id' => $vehicle->id,
             'fiscal_year_id' => $fiscalYear->id,
@@ -102,7 +111,11 @@ class TaxCalculationService
                 'total_renewal_fee' => (float)$totalRenewalFee,
                 'total_penalty' => (float)$totalPenalty,
                 'total_insurance' => (float)$totalInsurance,
-                'grand_total' => (float)($totalTax + $totalRenewalFee + $totalPenalty + $totalInsurance),
+                'renewal_fee' => (float)$totalRenewalFee, // Individual renewal fee
+                'penalty_amount' => (float)$totalPenalty, // Individual penalty amount
+                'service_fee' => (float)$serviceFee,
+                'vat_amount' => (float)$vatAmount, // VAT on service fee only (13%)
+                'total_amount' => (float)$totalAmount, // Total payable (tax + insurance + renewal_fee + penalty + service_fee + VAT on service fee)
                 'years_count' => count($yearsToPay),
             ],
         ];
@@ -192,9 +205,9 @@ class TaxCalculationService
             $insuranceAmount = $insuranceRate->annual_premium;
         }
 
-        // Calculate penalty
+        // Calculate penalty (only if daysDelayed > 0)
         $penaltyPercentage = 0;
-        $renewalFeePenaltyPercentage = 100; // Default 100% on renewal fee
+        $renewalFeePenaltyPercentage = 0; // Default 0% - no penalty if not delayed
 
         if ($daysDelayed > 0) {
             $penaltyPercentage = PenaltyConfig::getPenaltyPercentage($daysDelayed);
@@ -209,11 +222,31 @@ class TaxCalculationService
 
             if ($penaltyConfig) {
                 $renewalFeePenaltyPercentage = $penaltyConfig->renewal_fee_penalty_percentage;
+            } else {
+                // If no penalty config found but daysDelayed > 0, use default 100% on renewal fee
+                $renewalFeePenaltyPercentage = 100;
             }
         }
 
         $penaltyAmount = ($taxAmount * $penaltyPercentage) / 100;
         $renewalFeePenalty = ($renewalFee * $renewalFeePenaltyPercentage) / 100;
+
+        // Log penalty calculation for debugging
+        if ($daysDelayed > 0) {
+            \Log::info('Penalty calculated', [
+                'days_delayed' => $daysDelayed,
+                'penalty_percentage' => $penaltyPercentage,
+                'penalty_amount' => $penaltyAmount,
+                'renewal_fee_penalty_percentage' => $renewalFeePenaltyPercentage,
+                'renewal_fee_penalty' => $renewalFeePenalty,
+            ]);
+        } else {
+            \Log::info('No penalty - vehicle not delayed', [
+                'days_delayed' => $daysDelayed,
+                'penalty_amount' => $penaltyAmount,
+                'renewal_fee_penalty' => $renewalFeePenalty,
+            ]);
+        }
 
         $expiryBS = NepalDateService::toBS($expiryDate);
 

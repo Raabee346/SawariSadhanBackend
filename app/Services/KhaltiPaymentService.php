@@ -14,17 +14,32 @@ class KhaltiPaymentService
     public function __construct()
     {
         // Use test credentials for demo/testing
-        // Get these from: https://khalti.com/merchant/
-        // Test credentials are available in Khalti merchant dashboard
+        // Get these from: https://khalti.com/merchant/ or https://test-admin.khalti.com
+        // Test credentials are available in Khalti test merchant dashboard
         $this->secretKey = config('services.khalti.secret_key', 'test_secret_key_xxxxxxxxxxxxxxxxx');
         $this->publicKey = config('services.khalti.public_key', 'test_public_key_xxxxxxxxxxxxxxxxx');
+
+        // Log key status (without exposing full key)
+        $keyPrefix = $this->secretKey ? substr($this->secretKey, 0, 10) . '...' : 'NOT SET';
+        Log::info('Khalti service initialized', [
+            'secret_key_prefix' => $keyPrefix,
+            'secret_key_length' => $this->secretKey ? strlen($this->secretKey) : 0,
+            'public_key_prefix' => $this->publicKey ? substr($this->publicKey, 0, 10) . '...' : 'NOT SET',
+            'public_key_length' => $this->publicKey ? strlen($this->publicKey) : 0,
+        ]);
 
         // Use sandbox URL for testing, production URL for live payments
         // Sandbox: https://a.khalti.com/api/v2
         // Production: https://khalti.com/api/v2
-        $this->baseUrl = config('services.khalti.sandbox', true)
+        $isSandbox = config('services.khalti.sandbox', true);
+        $this->baseUrl = $isSandbox
             ? 'https://a.khalti.com/api/v2'
             : 'https://khalti.com/api/v2';
+            
+        Log::info('Khalti base URL configured', [
+            'base_url' => $this->baseUrl,
+            'is_sandbox' => $isSandbox,
+        ]);
     }
 
     /**
@@ -40,38 +55,112 @@ class KhaltiPaymentService
     public function initiatePayment(float $amount, string $transactionId, string $productName, array $additionalData = [])
     {
         try {
+            // Get return_url and website_url from config, with fallbacks
+            $returnUrl = config('services.khalti.return_url');
+            $websiteUrl = config('services.khalti.website_url');
+            
+            // If not set in config, use defaults
+            if (empty($returnUrl)) {
+                $returnUrl = url('/api/payments/khalti/callback');
+            }
+            if (empty($websiteUrl)) {
+                $websiteUrl = url('/');
+            }
+            
             $payload = [
-                'return_url' => config('services.khalti.return_url', url('/api/payments/khalti/callback')),
-                'website_url' => config('services.khalti.website_url', url('/')),
+                'return_url' => $returnUrl,
+                'website_url' => $websiteUrl,
                 'amount' => (int)($amount * 100), // Convert to paisa (amount * 100)
                 'purchase_order_id' => $transactionId,
                 'purchase_order_name' => $productName,
             ];
+            
+            Log::info('Khalti payment payload prepared', [
+                'return_url' => $returnUrl,
+                'website_url' => $websiteUrl,
+                'amount_paisa' => $payload['amount'],
+            ]);
 
             // Add additional data if provided
             if (!empty($additionalData)) {
                 $payload = array_merge($payload, $additionalData);
             }
 
+            // Validate secret key before making request
+            if (empty($this->secretKey) || $this->secretKey === 'test_secret_key_xxxxxxxxxxxxxxxxx') {
+                Log::error('Khalti secret key is not configured properly', [
+                    'key_set' => !empty($this->secretKey),
+                    'is_default' => $this->secretKey === 'test_secret_key_xxxxxxxxxxxxxxxxx',
+                ]);
+                return [
+                    'success' => false,
+                    'message' => 'Khalti secret key is not configured. Please set KHALTI_SECRET_KEY in your .env file.',
+                ];
+            }
+
+            $authHeader = 'Key ' . $this->secretKey;
+            Log::info('Sending Khalti payment initiation request', [
+                'url' => $this->baseUrl . '/epayment/initiate/',
+                'amount_paisa' => $payload['amount'],
+                'transaction_id' => $payload['purchase_order_id'],
+                'auth_header_prefix' => substr($authHeader, 0, 15) . '...',
+            ]);
+
             $response = Http::withHeaders([
-                'Authorization' => 'Key ' . $this->secretKey,
+                'Authorization' => $authHeader,
                 'Content-Type' => 'application/json',
             ])->post($this->baseUrl . '/epayment/initiate/', $payload);
 
             $responseData = $response->json();
+            
+            Log::info('Khalti API response', [
+                'status_code' => $response->status(),
+                'successful' => $response->successful(),
+                'has_payment_url' => isset($responseData['payment_url']),
+                'has_pidx' => isset($responseData['pidx']),
+                'response_keys' => $responseData ? array_keys($responseData) : [],
+            ]);
 
             if ($response->successful() && isset($responseData['payment_url'])) {
-                return [
+                $result = [
                     'success' => true,
                     'payment_url' => $responseData['payment_url'],
                     'pidx' => $responseData['pidx'] ?? null,
                     'data' => $responseData,
                 ];
+                
+                Log::info('Khalti payment initiated successfully', [
+                    'pidx' => $result['pidx'],
+                ]);
+                
+                return $result;
+            }
+
+            $errorMessage = $responseData['detail'] ?? ($responseData['message'] ?? 'Failed to initiate payment');
+            
+            // Provide helpful error message for 401 errors
+            if ($response->status() === 401) {
+                $errorMessage = 'Invalid Khalti secret key. Please verify your KHALTI_SECRET_KEY in .env file. For test mode, get keys from https://test-admin.khalti.com';
+                Log::error('Khalti payment initiation failed - Invalid token (401)', [
+                    'status_code' => $response->status(),
+                    'error' => $errorMessage,
+                    'response' => $responseData,
+                    'base_url' => $this->baseUrl,
+                    'secret_key_configured' => !empty($this->secretKey) && $this->secretKey !== 'test_secret_key_xxxxxxxxxxxxxxxxx',
+                    'secret_key_length' => strlen($this->secretKey ?? ''),
+                    'hint' => 'Make sure KHALTI_SECRET_KEY is set in .env file with a valid test secret key from https://test-admin.khalti.com',
+                ]);
+            } else {
+                Log::error('Khalti payment initiation failed', [
+                    'status_code' => $response->status(),
+                    'error' => $errorMessage,
+                    'response' => $responseData,
+                ]);
             }
 
             return [
                 'success' => false,
-                'message' => $responseData['detail'] ?? 'Failed to initiate payment',
+                'message' => $errorMessage,
                 'error' => $responseData,
             ];
         } catch (\Exception $e) {

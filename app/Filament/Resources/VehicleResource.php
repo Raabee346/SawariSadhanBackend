@@ -22,6 +22,8 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use App\Services\FCMNotificationService;
 use UnitEnum;
 
 class VehicleResource extends Resource
@@ -106,9 +108,20 @@ class VehicleResource extends Resource
                     ])
                     ->default('pending')
                     ->required()
-                    ->label('Verification Status'),
+                    ->label('Verification Status')
+                    ->live()
+                    ->afterStateUpdated(function ($state, $set) {
+                        // Clear rejection reason if status is not rejected
+                        if ($state !== 'rejected') {
+                            $set('rejection_reason', null);
+                        }
+                    }),
                 Textarea::make('rejection_reason')
+                    ->label('Rejection Reason')
                     ->rows(3)
+                    ->placeholder('Enter the reason for rejection')
+                    ->helperText('This reason will be sent to the user in the notification')
+                    ->required(fn (Get $get) => $get('verification_status') === 'rejected')
                     ->visible(fn (Get $get) => $get('verification_status') === 'rejected'),
                 Toggle::make('is_commercial')
                     ->default(false),
@@ -252,6 +265,25 @@ class VehicleResource extends Resource
                             'verified_at' => now(),
                             'rejection_reason' => null,
                         ]);
+                        
+                        // Refresh the record to ensure we have the latest data
+                        $record->refresh();
+                        $record->load('user'); // Ensure user relationship is loaded
+                        
+                        // Send notification to user and refresh vehicle list
+                        try {
+                            $fcmService = app(FCMNotificationService::class);
+                            $fcmService->notifyVehicleVerification($record, 'approved');
+                            Log::info('Vehicle approved notification sent', [
+                                'vehicle_id' => $record->id,
+                                'user_id' => $record->user_id,
+                            ]);
+                        } catch (\Exception $e) {
+                            Log::error('Failed to send vehicle approval notification', [
+                                'vehicle_id' => $record->id,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
                     })
                     ->visible(fn (Vehicle $record) => $record->verification_status === 'pending'),
                 Action::make('reject')
@@ -272,6 +304,26 @@ class VehicleResource extends Resource
                             'verified_at' => now(),
                             'rejection_reason' => $data['rejection_reason'],
                         ]);
+                        
+                        // Refresh the record to ensure we have the latest data including rejection_reason
+                        $record->refresh();
+                        $record->load('user'); // Ensure user relationship is loaded
+                        
+                        // Send notification to user
+                        try {
+                            $fcmService = app(FCMNotificationService::class);
+                            $fcmService->notifyVehicleVerification($record, 'rejected');
+                            Log::info('Vehicle rejection notification sent', [
+                                'vehicle_id' => $record->id,
+                                'user_id' => $record->user_id,
+                                'rejection_reason' => $record->rejection_reason,
+                            ]);
+                        } catch (\Exception $e) {
+                            Log::error('Failed to send vehicle rejection notification', [
+                                'vehicle_id' => $record->id,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
                     })
                     ->visible(fn (Vehicle $record) => $record->verification_status === 'pending'),
                 ViewAction::make(),

@@ -245,6 +245,56 @@ class FCMNotificationService
     }
 
     /**
+     * Send notification to all users
+     */
+    public function sendToAllUsers(string $title, string $body, array $data = [])
+    {
+        if (!$this->isAvailable) {
+            Log::warning('FCM not available, skipping broadcast to all users');
+            return false;
+        }
+
+        try {
+            // Send to 'users' topic
+            $success = $this->sendToTopic('users', $title, $body, $data);
+            
+            if ($success) {
+                Log::info('Broadcast notification sent to all users via topic');
+            }
+            
+            return $success;
+        } catch (\Exception $e) {
+            Log::error('Failed to send notification to all users: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Send notification to all vendors
+     */
+    public function sendToAllVendors(string $title, string $body, array $data = [])
+    {
+        if (!$this->isAvailable) {
+            Log::warning('FCM not available, skipping broadcast to all vendors');
+            return false;
+        }
+
+        try {
+            // Send to 'vendors' topic
+            $success = $this->sendToTopic('vendors', $title, $body, $data);
+            
+            if ($success) {
+                Log::info('Broadcast notification sent to all vendors via topic');
+            }
+            
+            return $success;
+        } catch (\Exception $e) {
+            Log::error('Failed to send notification to all vendors: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Send renewal request notification to vendors
      * Sends to ALL vendors (online and offline) so they get notified even when not in app
      */
@@ -292,6 +342,9 @@ class FCMNotificationService
                 'pickup_address' => $renewalRequest->pickup_address,
                 'pickup_date' => $pickupDateFormatted,
                 'total_amount' => (string) $renewalRequest->total_amount,
+                // Include title and body in data payload for data-only message support
+                'title' => $title,
+                'body' => $body,
             ];
 
             Log::info('Sending FCM notification for new renewal request', [
@@ -345,6 +398,7 @@ class FCMNotificationService
                 'vendors_notified' => $successCount,
                 'topic_sent' => $topicSent,
                 'has_location' => !empty($requestLat) && !empty($requestLng),
+                'note' => 'Vendors will receive FCM notification which triggers automatic API call to /api/renewal-requests/available',
             ]);
 
             return $successCount > 0 || $topicSent;
@@ -482,8 +536,78 @@ class FCMNotificationService
             'type' => 'renewal_request_update',
             'renewal_request_id' => (string) $renewalRequest->id,
             'status' => $status,
+            // Include title and body in data payload for notification display
+            'title' => $title,
+            'body' => $body,
         ];
 
         return $this->sendToUser($user, $title, $body, $data);
+    }
+
+    /**
+     * Notify user about vehicle verification status
+     */
+    public function notifyVehicleVerification($vehicle, string $status)
+    {
+        if (!$this->isAvailable) {
+            Log::warning('FCM not available, skipping vehicle verification notification');
+            return false;
+        }
+
+        $user = $vehicle->user;
+        if (!$user) {
+            Log::warning("No user found for vehicle {$vehicle->id}");
+            return false;
+        }
+
+        // Refresh vehicle to ensure we have latest data including rejection_reason
+        $vehicle->refresh();
+
+        $vehicleNumber = $vehicle->registration_number ?? 'N/A';
+        
+        $titles = [
+            'approved' => 'Vehicle Verified!',
+            'rejected' => 'Vehicle Verification Rejected',
+        ];
+
+        // Build body message
+        if ($status === 'approved') {
+            $body = "Your vehicle {$vehicleNumber} has been verified and approved. You can now proceed with renewal services.";
+        } elseif ($status === 'rejected') {
+            $rejectionReason = $vehicle->rejection_reason ?? 'No reason provided';
+            $body = "Your vehicle {$vehicleNumber} verification was rejected.\n\nReason: {$rejectionReason}\n\nPlease update your vehicle information and resubmit for verification.";
+        } else {
+            $body = "Your vehicle {$vehicleNumber} verification status has been updated to {$status}.";
+        }
+
+        $title = $titles[$status] ?? 'Vehicle Verification Update';
+
+        $data = [
+            'type' => 'vehicle_verification_update',
+            'vehicle_id' => (string) $vehicle->id,
+            'verification_status' => $status,
+            'registration_number' => $vehicleNumber,
+            // Include title and body in data payload for data-only message support
+            'title' => $title,
+            'body' => $body,
+        ];
+
+        // Include rejection reason in data payload if rejected
+        if ($status === 'rejected' && $vehicle->rejection_reason) {
+            $data['rejection_reason'] = $vehicle->rejection_reason;
+        }
+
+        $success = $this->sendToUser($user, $title, $body, $data);
+        
+        if ($success) {
+            Log::info('Vehicle verification notification sent', [
+                'vehicle_id' => $vehicle->id,
+                'user_id' => $user->id,
+                'status' => $status,
+                'has_rejection_reason' => $status === 'rejected' && !empty($vehicle->rejection_reason),
+            ]);
+        }
+        
+        return $success;
     }
 }
