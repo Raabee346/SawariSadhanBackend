@@ -12,6 +12,7 @@ class RenewalRequest extends Model
 
     protected $fillable = [
         'user_id',
+        'user_phone_number',
         'vehicle_id',
         'payment_id',
         'vendor_id',
@@ -37,8 +38,14 @@ class RenewalRequest extends Model
         'payment_method',
         'payment_status',
         'assigned_at',
+        'en_route_at',
         'started_at',
+        'document_picked_up_at',
+        'document_photo',
+        'signature_photo',
+        'at_dotm_at',
         'completed_at',
+        'delivered_at',
         'cancelled_at',
         'notes',
         'cancellation_reason',
@@ -59,8 +66,12 @@ class RenewalRequest extends Model
         'vat_amount' => 'decimal:2',
         'total_amount' => 'decimal:2',
         'assigned_at' => 'datetime',
+        'en_route_at' => 'datetime',
         'started_at' => 'datetime',
+        'document_picked_up_at' => 'datetime',
+        'at_dotm_at' => 'datetime',
         'completed_at' => 'datetime',
+        'delivered_at' => 'datetime',
         'cancelled_at' => 'datetime',
     ];
 

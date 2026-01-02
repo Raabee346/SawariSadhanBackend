@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class RenewalRequestController extends Controller
 {
@@ -196,9 +197,14 @@ class RenewalRequestController extends Controller
                 throw new \Exception('Invalid pickup date: ' . $request->pickup_date);
             }
             
+            // Get user phone number from profile
+            $userProfile = $request->user()->profile;
+            $userPhoneNumber = $userProfile ? $userProfile->phone_number : null;
+            
             // Prepare data array for creation
             $renewalRequestData = [
                 'user_id' => $request->user()->id,
+                'user_phone_number' => $userPhoneNumber,
                 'vehicle_id' => $payment->vehicle_id,
                 'payment_id' => $payment->id,
                 'fiscal_year_id' => $payment->fiscal_year_id,
@@ -438,6 +444,8 @@ class RenewalRequestController extends Controller
     {
         $requests = RenewalRequest::where('user_id', $request->user()->id)
             ->whereIn('status', ['pending', 'assigned', 'in_progress'])
+            ->whereNull('delivered_at') // Exclude delivered/completed requests
+            ->whereNull('completed_at') // Exclude completed requests
             ->with(['vehicle.province', 'vendor.profile', 'fiscalYear'])
             ->latest()
             ->get();
@@ -478,8 +486,9 @@ class RenewalRequestController extends Controller
         ]);
         
         // Base query: pending requests without vendor assigned
+        // Only show requests that are pending and haven't been accepted by any vendor
         $query = RenewalRequest::where('status', 'pending')
-            ->whereNull('vendor_id'); // Only show requests not yet accepted
+            ->whereNull('vendor_id'); // Only show requests not yet accepted by any vendor
         
         // Log all pending requests for debugging
         $allPendingRequests = RenewalRequest::where('status', 'pending')
@@ -666,7 +675,13 @@ class RenewalRequestController extends Controller
             ->latest();
 
         if ($status) {
-            $query->where('status', $status);
+            // Support comma-separated statuses for filtering
+            $statuses = explode(',', $status);
+            $statuses = array_map('trim', $statuses);
+            $query->whereIn('status', $statuses);
+        } else {
+            // Default: exclude completed and cancelled requests
+            $query->whereNotIn('status', ['completed', 'cancelled']);
         }
 
         $requests = $query->get();
@@ -698,12 +713,26 @@ class RenewalRequestController extends Controller
                 ], 403);
             }
 
-            // Assign request to vendor
-            $renewalRequest->update([
+            // Prepare update data
+            $updateData = [
                 'status' => 'assigned',
                 'vendor_id' => $request->user()->id,
                 'assigned_at' => now(),
-            ]);
+            ];
+
+            // Update drop-off location if provided
+            if ($request->has('dropoff_address') && $request->dropoff_address !== null) {
+                $updateData['dropoff_address'] = $request->dropoff_address;
+            }
+            if ($request->has('dropoff_latitude') && $request->dropoff_latitude !== null) {
+                $updateData['dropoff_latitude'] = (float) $request->dropoff_latitude;
+            }
+            if ($request->has('dropoff_longitude') && $request->dropoff_longitude !== null) {
+                $updateData['dropoff_longitude'] = (float) $request->dropoff_longitude;
+            }
+
+            // Assign request to vendor
+            $renewalRequest->update($updateData);
 
             // DO NOT notify other vendors - request will be hidden from their list automatically
             // Other vendors will see it disappear from available requests without notification
@@ -782,6 +811,308 @@ class RenewalRequestController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to decline request: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Update workflow status (en_route, document_picked_up, at_dotm, delivered)
+     */
+    public function updateWorkflowStatus(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'workflow_status' => 'required|in:en_route,arrived,document_picked_up,at_dotm,processing_complete,en_route_dropoff,arrived_dropoff,delivered',
+            'notes' => 'nullable|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $renewalRequest = RenewalRequest::findOrFail($id);
+
+        // Check permissions - only vendor who accepted the request can update workflow
+        $vendor = $request->user();
+        if ($renewalRequest->vendor_id !== $vendor->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. You can only update requests you have accepted.',
+            ], 403);
+        }
+
+        DB::beginTransaction();
+        try {
+            $updateData = [];
+            $statusMessage = '';
+            $shouldNotify = true; // Default to true for most statuses
+
+            switch ($request->workflow_status) {
+                case 'en_route':
+                    // Only update if en_route_at is not already set (to prevent duplicate notifications)
+                    $shouldNotify = $renewalRequest->en_route_at === null;
+                    $updateData['en_route_at'] = now();
+                    $updateData['status'] = 'in_progress'; // Change status to in_progress when en route
+                    $updateData['started_at'] = now(); // Also set started_at
+                    $statusMessage = 'Rider is en route to pickup location';
+                    break;
+                case 'arrived':
+                    // Rider has arrived at pickup location - notify user
+                    $statusMessage = 'Rider has arrived at pickup location';
+                    // No database update needed, just notification
+                    break;
+                case 'document_picked_up':
+                    // Only update if not already set (prevent duplicate notifications)
+                    $shouldNotifyDocumentPickup = $renewalRequest->document_picked_up_at === null;
+                    if ($shouldNotifyDocumentPickup) {
+                        $updateData['document_picked_up_at'] = now();
+                    }
+                    $statusMessage = 'Documents have been picked up';
+                    break;
+                case 'at_dotm':
+                    $updateData['at_dotm_at'] = now();
+                    $statusMessage = 'Rider is at DoTM office';
+                    break;
+                case 'processing_complete':
+                    // Processing at Yatayat is complete - notify user
+                    // No database update needed, just notification
+                    $statusMessage = 'Processing at Yatayat is complete';
+                    break;
+                case 'en_route_dropoff':
+                    // Rider is en route for dropoff - notify user
+                    // No database update needed, just notification
+                    $statusMessage = 'Rider is en route for drop-off';
+                    break;
+                case 'arrived_dropoff':
+                    // Rider has arrived for dropoff - notify user (only once)
+                    // Check if already delivered to prevent duplicates
+                    $shouldNotifyArrivedDropoff = !$renewalRequest->delivered_at; // Only notify if not already delivered
+                    // No database update needed, just notification
+                    $statusMessage = 'Rider has arrived for document drop-off';
+                    break;
+                case 'delivered':
+                    $updateData['delivered_at'] = now();
+                    $updateData['status'] = 'completed';
+                    $updateData['completed_at'] = now();
+                    $statusMessage = 'Documents have been delivered to client';
+                    break;
+            }
+
+            if ($request->has('notes') && $request->notes) {
+                $updateData['notes'] = $request->notes;
+            }
+
+            $renewalRequest->update($updateData);
+
+            // Notify user about workflow status update
+            // For en_route, only notify if it's the first time (en_route_at was null before)
+            if ($request->workflow_status === 'en_route' && !$shouldNotify) {
+                // Don't notify if en_route_at was already set (duplicate click)
+                \Log::info('Skipping notification for en_route - already notified', [
+                    'renewal_request_id' => $renewalRequest->id,
+                ]);
+            } else if ($request->workflow_status === 'arrived') {
+                // Always notify for arrival
+                $renewalRequest->refresh(); // Refresh to ensure we have latest data
+                $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
+            } else if ($request->workflow_status === 'processing_complete') {
+                // Always notify for processing completion
+                $renewalRequest->refresh();
+                $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
+            } else if ($request->workflow_status === 'en_route_dropoff') {
+                // Always notify for dropoff en route
+                $renewalRequest->refresh();
+                $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
+            } else if ($request->workflow_status === 'arrived_dropoff') {
+                // Only notify for dropoff arrival if not already delivered (prevent duplicates)
+                if (isset($shouldNotifyArrivedDropoff) && $shouldNotifyArrivedDropoff) {
+                    $renewalRequest->refresh();
+                    $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
+                } else {
+                    \Log::info('Skipping notification for arrived_dropoff - already delivered or notified', [
+                        'renewal_request_id' => $renewalRequest->id,
+                    ]);
+                }
+            } else if ($request->workflow_status === 'document_picked_up') {
+                // Only notify if this is the first time (checked before update)
+                // Note: $shouldNotifyDocumentPickup is set in the switch case before update
+                if (isset($shouldNotifyDocumentPickup) && $shouldNotifyDocumentPickup) {
+                    // Refresh the model to get updated data before notifying
+                    $renewalRequest->refresh();
+                    $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
+                } else {
+                    \Log::info('Skipping notification for document_picked_up - already notified', [
+                        'renewal_request_id' => $renewalRequest->id,
+                    ]);
+                }
+            } else {
+                // Notify for all other statuses or first-time en_route
+                $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
+            }
+
+            $renewalRequest->load(['vehicle.province', 'payment', 'user.profile', 'vendor.profile', 'fiscalYear']);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => $statusMessage,
+                'data' => $renewalRequest,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error updating workflow status', [
+                'error' => $e->getMessage(),
+                'renewal_request_id' => $id,
+                'vendor_id' => $vendor->id,
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update workflow status: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Upload document pickup photo
+     */
+    public function uploadDocumentPhoto(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'document_photo' => 'required|image|mimes:jpeg,png,jpg|max:5120', // 5MB max
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $renewalRequest = RenewalRequest::findOrFail($id);
+
+        // Check permissions
+        $vendor = $request->user();
+        if ($renewalRequest->vendor_id !== $vendor->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. You can only upload photos for requests you have accepted.',
+            ], 403);
+        }
+
+        DB::beginTransaction();
+        try {
+            // Delete old photo if exists
+            if ($renewalRequest->document_photo) {
+                \Storage::disk('public')->delete($renewalRequest->document_photo);
+            }
+
+            // Upload new photo
+            $file = $request->file('document_photo');
+            $filename = 'document_pickup_' . $renewalRequest->id . '_' . time() . '.' . $file->extension();
+            $path = $file->storeAs('renewal_requests/documents', $filename, 'public');
+
+            // Update renewal request - only update document_photo
+            // Do NOT set document_picked_up_at here - that should be done via updateWorkflowStatus endpoint
+            // This prevents duplicate notifications when both endpoints are called
+            $renewalRequest->update([
+                'document_photo' => $path,
+            ]);
+
+            // Do NOT send notification here - updateWorkflowStatus endpoint will handle it
+            // This prevents duplicate notifications
+
+            $renewalRequest->load(['vehicle.province', 'payment', 'user.profile', 'vendor.profile', 'fiscalYear']);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Document photo uploaded successfully',
+                'data' => $renewalRequest,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error uploading document photo', [
+                'error' => $e->getMessage(),
+                'renewal_request_id' => $id,
+                'vendor_id' => $vendor->id,
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to upload document photo: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Upload signature photo for dropoff confirmation
+     */
+    public function uploadSignaturePhoto(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'signature_photo' => 'required|image|mimes:jpeg,png,jpg|max:5120', // 5MB max
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $renewalRequest = RenewalRequest::findOrFail($id);
+
+        // Check permissions
+        $vendor = $request->user();
+        if ($renewalRequest->vendor_id !== $vendor->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. You can only upload signatures for requests you have accepted.',
+            ], 403);
+        }
+
+        DB::beginTransaction();
+        try {
+            // Delete old signature if exists
+            if ($renewalRequest->signature_photo) {
+                \Storage::disk('public')->delete($renewalRequest->signature_photo);
+            }
+
+            // Upload new signature
+            $file = $request->file('signature_photo');
+            $filename = 'signature_' . $renewalRequest->id . '_' . time() . '.' . $file->extension();
+            $path = $file->storeAs('renewal_requests/signatures', $filename, 'public');
+
+            // Update renewal request
+            $renewalRequest->update([
+                'signature_photo' => $path,
+            ]);
+
+            $renewalRequest->load(['vehicle.province', 'payment', 'user.profile', 'vendor.profile', 'fiscalYear']);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Signature uploaded successfully',
+                'data' => $renewalRequest,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error uploading signature photo', [
+                'error' => $e->getMessage(),
+                'renewal_request_id' => $id,
+                'vendor_id' => $vendor->id,
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to upload signature photo: ' . $e->getMessage(),
             ], 500);
         }
     }
@@ -867,26 +1198,168 @@ class RenewalRequestController extends Controller
 
     /**
      * Get a specific renewal request
+     * Accessible to both users and vendors
      */
     public function show(Request $request, $id)
     {
-        $renewalRequest = RenewalRequest::with(['vehicle.province', 'payment', 'user', 'vendor.profile', 'fiscalYear'])
-            ->findOrFail($id);
+        try {
+            // Load relationships with error handling
+            $renewalRequest = RenewalRequest::with([
+                'vehicle.province', 
+                'payment', 
+                'user.profile',  // Load user profile to get phone number and profile picture
+                'vendor.profile', 
+                'fiscalYear'
+            ])
+                ->findOrFail($id);
+            
+            // Ensure user relationship is loaded (it should be, but double-check)
+            if (!$renewalRequest->relationLoaded('user')) {
+                $renewalRequest->load('user');
+            }
+            
+            // Ensure user profile is loaded if user exists
+            if ($renewalRequest->user && !$renewalRequest->user->relationLoaded('profile')) {
+                $renewalRequest->user->load('profile');
+            }
 
-        // Check permissions
-        if ($renewalRequest->user_id !== $request->user()->id && 
-            ($request->user()->isVendor() && $renewalRequest->vendor_id !== $request->user()->id) &&
-            ($request->user()->isVendor() && $renewalRequest->status !== 'pending')) {
+            $user = $request->user();
+            
+            // Check if user is vendor by checking VendorProfile table directly
+            // This is more reliable than using the relationship
+            $isVendor = false;
+            try {
+                $vendorProfile = \App\Models\VendorProfile::where('vendor_id', $user->id)->first();
+                $isVendor = $vendorProfile !== null;
+            } catch (\Exception $e) {
+                \Log::warning('Error checking if user is vendor', [
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage()
+                ]);
+                // Default to false if check fails
+                $isVendor = false;
+            }
+            $isUser = !$isVendor;
+
+            // Log permission check details
+            \Log::info('Checking access for renewal request', [
+                'request_id' => $id,
+                'user_id' => $user->id,
+                'is_vendor' => $isVendor,
+                'is_user' => $isUser,
+                'request_status' => $renewalRequest->status,
+                'request_vendor_id' => $renewalRequest->vendor_id,
+                'request_payment_status' => $renewalRequest->payment_status,
+                'request_user_id' => $renewalRequest->user_id,
+            ]);
+
+            // Check permissions
+            $hasAccess = false;
+
+            // First, check if user owns the request (users should always be able to view their own requests)
+            if ($renewalRequest->user_id === $user->id) {
+                $hasAccess = true;
+                \Log::info('User owns the request - access granted', [
+                    'request_user_id' => $renewalRequest->user_id,
+                    'current_user_id' => $user->id,
+                ]);
+            } else if ($isVendor) {
+                // Vendors can view:
+                // 1. Requests they have accepted (vendor_id matches)
+                // 2. Any pending request that hasn't been assigned yet (vendor_id is null)
+                //    This includes all requests that appear in "available" list
+                $hasAccess = ($renewalRequest->vendor_id === $user->id) || 
+                            ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null);
+                
+                \Log::info('Vendor access check', [
+                    'has_access' => $hasAccess,
+                    'vendor_id_matches' => $renewalRequest->vendor_id === $user->id,
+                    'is_pending_and_unassigned' => ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null),
+                    'request_status' => $renewalRequest->status,
+                    'request_vendor_id' => $renewalRequest->vendor_id,
+                    'current_user_id' => $user->id,
+                ]);
+            } else {
+                // Fallback: If vendor check failed but request is pending and unassigned,
+                // allow access (handles edge cases where vendorProfile might not be loaded)
+                if ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null) {
+                    \Log::warning('Vendor check failed but allowing access to pending unassigned request (fallback)', [
+                        'user_id' => $user->id,
+                        'request_id' => $id,
+                    ]);
+                    $hasAccess = true;
+                } else {
+                    \Log::warning('Access denied - user is not vendor and request is not available', [
+                        'user_id' => $user->id,
+                        'request_id' => $id,
+                        'request_status' => $renewalRequest->status,
+                        'request_vendor_id' => $renewalRequest->vendor_id,
+                    ]);
+                }
+            }
+
+            if (!$hasAccess) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. You do not have permission to view this request.',
+                ], 403);
+            }
+
+            // Ensure all relationships are safely loaded before serialization
+            // Handle cases where relationships might be null
+            if ($renewalRequest->user && $renewalRequest->user->profile) {
+                // Profile is already loaded, ensure it serializes correctly
+                $renewalRequest->user->makeVisible(['profile']);
+            }
+            
+            // Convert to array to ensure proper serialization
+            // This helps catch any serialization issues before sending response
+            try {
+                $renewalRequestArray = $renewalRequest->toArray();
+                
+                return response()->json([
+                    'success' => true,
+                    'data' => $renewalRequestArray,
+                ]);
+            } catch (\Exception $e) {
+                \Log::error('Error serializing renewal request', [
+                    'id' => $id,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                
+                // If serialization fails, try to return the model directly
+                // Laravel will handle serialization automatically
+                return response()->json([
+                    'success' => true,
+                    'data' => $renewalRequest,
+                ]);
+            }
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            \Log::error('Renewal request not found', [
+                'id' => $id,
+                'user_id' => $request->user()->id,
+                'error' => $e->getMessage()
+            ]);
+            
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized',
-            ], 403);
+                'message' => 'Renewal request not found.',
+            ], 404);
+        } catch (\Exception $e) {
+            \Log::error('Error fetching renewal request', [
+                'id' => $id,
+                'user_id' => $request->user()->id ?? null,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while fetching the renewal request. Please try again.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
         }
-
-        return response()->json([
-            'success' => true,
-            'data' => $renewalRequest,
-        ]);
     }
 
     /**

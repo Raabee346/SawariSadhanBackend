@@ -518,6 +518,14 @@ class FCMNotificationService
         $titles = [
             'assigned' => 'Request Assigned',
             'in_progress' => 'Service Started',
+            'en_route' => 'Rider En Route',
+            'arrived' => 'Rider Has Arrived',
+            'document_picked_up' => 'Documents Picked Up',
+            'at_dotm' => 'At DoTM Office',
+            'processing_complete' => 'Processing Complete',
+            'en_route_dropoff' => 'Rider En Route for Drop-Off',
+            'arrived_dropoff' => 'Rider Arrived for Drop-Off',
+            'delivered' => 'Documents Delivered',
             'completed' => 'Service Completed',
             'cancelled' => 'Request Cancelled',
         ];
@@ -525,6 +533,14 @@ class FCMNotificationService
         $bodies = [
             'assigned' => "A rider has accepted your renewal request",
             'in_progress' => "Rider has started processing your renewal",
+            'en_route' => "Rider is on the way to pickup your documents",
+            'arrived' => "Rider has arrived at your pickup location. Please be ready with your documents.",
+            'document_picked_up' => "Rider has picked up your documents",
+            'at_dotm' => "Rider is at DoTM office processing your renewal",
+            'processing_complete' => "Your bluebook renewal processing at Yatayat is complete. Rider will deliver your documents soon.",
+            'en_route_dropoff' => "Rider is on the way to deliver your documents. Please be ready to receive them.",
+            'arrived_dropoff' => "Rider has arrived for document drop-off. Please be ready to receive your documents.",
+            'delivered' => "Your documents have been delivered successfully. Thank you for using Sawari Sewa!",
             'completed' => "Your bluebook renewal has been completed",
             'cancelled' => "Your renewal request has been cancelled",
         ];
