@@ -48,21 +48,29 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{id}/verify-khalti', [PaymentController::class, 'verifyKhaltiPayment']);
     });
 
-    // Vendor Renewal Request Routes (must come before customer routes to avoid route conflicts)
-    Route::prefix('renewal-requests')->middleware('vendor')->group(function () {
-        Route::get('/available', [RenewalRequestController::class, 'getAvailable']);
-        Route::get('/my-requests', [RenewalRequestController::class, 'getVendorRequests']);
-        Route::post('/{id}/accept', [RenewalRequestController::class, 'accept']);
-        Route::post('/{id}/decline', [RenewalRequestController::class, 'decline']);
-    });
-
-    // Renewal Request Routes (customer routes - wildcard routes come after specific vendor routes)
-    Route::prefix('renewal-requests')->middleware('customer')->group(function () {
-        Route::get('/', [RenewalRequestController::class, 'index']);
-        Route::get('/in-progress', [RenewalRequestController::class, 'getInProgress']);
-        Route::post('/', [RenewalRequestController::class, 'store']);
+    // Renewal Request Routes - accessible to both users and vendors
+    Route::prefix('renewal-requests')->group(function () {
+        // Customer-specific routes (must come before /{id} route to avoid route conflicts)
+        Route::middleware('customer')->group(function () {
+            Route::get('/', [RenewalRequestController::class, 'index']);
+            Route::get('/in-progress', [RenewalRequestController::class, 'getInProgress']);
+            Route::post('/', [RenewalRequestController::class, 'store']);
+            Route::put('/{id}/status', [RenewalRequestController::class, 'updateStatus']);
+        });
+        
+        // Vendor-specific routes (must come before /{id} route to avoid route conflicts)
+        Route::middleware('vendor')->group(function () {
+            Route::get('/available', [RenewalRequestController::class, 'getAvailable']);
+            Route::get('/my-requests', [RenewalRequestController::class, 'getVendorRequests']);
+            Route::post('/{id}/accept', [RenewalRequestController::class, 'accept']);
+            Route::post('/{id}/decline', [RenewalRequestController::class, 'decline']);
+            Route::post('/{id}/workflow-status', [RenewalRequestController::class, 'updateWorkflowStatus']);
+            Route::post('/{id}/document-photo', [RenewalRequestController::class, 'uploadDocumentPhoto']);
+            Route::post('/{id}/signature-photo', [RenewalRequestController::class, 'uploadSignaturePhoto']);
+        });
+        
+        // Route accessible to both users and vendors (must come last to avoid conflicts)
         Route::get('/{id}', [RenewalRequestController::class, 'show']);
-        Route::put('/{id}/status', [RenewalRequestController::class, 'updateStatus']);
     });
 
     // FCM Token Update (available to both users and vendors)

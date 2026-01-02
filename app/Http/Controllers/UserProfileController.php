@@ -41,7 +41,43 @@ class UserProfileController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'phone_number' => 'nullable|string|max:15',
-            'date_of_birth' => 'nullable|date|before:today',
+            'date_of_birth' => ['nullable', 'string', function ($attribute, $value, $fail) {
+                if ($value === null || $value === '') {
+                    return; // Allow null/empty
+                }
+                // Check if it's a valid BS date format (e.g., "2080-01-15") or AD date format
+                // BS dates typically start with 20xx (years 2000-2099 in BS calendar)
+                // AD dates typically start with 19xx or 20xx (years 1900-2100 in AD calendar)
+                if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                    // It's in YYYY-MM-DD format
+                    $parts = explode('-', $value);
+                    $year = (int)$parts[0];
+                    $month = (int)$parts[1];
+                    $day = (int)$parts[2];
+                    
+                    // Validate date components
+                    if ($month < 1 || $month > 12 || $day < 1 || $day > 31) {
+                        $fail('The date of birth must be a valid date.');
+                        return;
+                    }
+                    
+                    // For AD dates (1900-2100), check if it's before today
+                    if ($year >= 1900 && $year <= 2100) {
+                        try {
+                            $date = \Carbon\Carbon::createFromFormat('Y-m-d', $value);
+                            if ($date->isFuture()) {
+                                $fail('The date of birth must be before today.');
+                            }
+                        } catch (\Exception $e) {
+                            $fail('The date of birth must be a valid date.');
+                        }
+                    }
+                    // For BS dates (2000-2099), just validate format - store as string
+                    // BS dates are stored as-is without conversion
+                } else {
+                    $fail('The date of birth must be in YYYY-MM-DD format.');
+                }
+            }],
             'gender' => 'nullable|in:male,female,other',
             'address' => 'nullable|string',
             'city' => 'nullable|string|max:100',

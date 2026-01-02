@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 use App\Traits\HasBSTimestamps;
 
 class UserProfile extends Model
@@ -32,6 +33,13 @@ class UserProfile extends Model
     ];
 
     /**
+     * The accessors to append to the model's array form.
+     *
+     * @var array
+     */
+    protected $appends = ['profile_picture_url'];
+
+    /**
      * Get the user that owns the profile.
      */
     public function user()
@@ -53,6 +61,33 @@ class UserProfile extends Model
         ]);
 
         return implode(', ', $parts);
+    }
+
+    /**
+     * Get the profile picture URL.
+     */
+    public function getProfilePictureUrlAttribute()
+    {
+        try {
+            if (!$this->profile_picture) {
+                return null;
+            }
+
+            // If it's already a full URL, return as is
+            if (str_starts_with($this->profile_picture, 'http://') || str_starts_with($this->profile_picture, 'https://')) {
+                return $this->profile_picture;
+            }
+
+            // Construct full URL from storage path
+            return asset('storage/' . $this->profile_picture);
+        } catch (\Exception $e) {
+            Log::warning('Error generating profile picture URL', [
+                'profile_id' => $this->id,
+                'profile_picture' => $this->profile_picture,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
     }
 
 }
