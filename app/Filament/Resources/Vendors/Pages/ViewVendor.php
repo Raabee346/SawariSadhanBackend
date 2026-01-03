@@ -9,7 +9,6 @@ use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\HtmlString;
-use App\Services\NepalDateService;
 use Carbon\Carbon;
 
 class ViewVendor extends ViewRecord
@@ -52,15 +51,15 @@ class ViewVendor extends ViewRecord
                 Placeholder::make('created_at')
                     ->label('Registered On')
                     ->content(function ($record) {
-                        // Get raw value from database to avoid double BS conversion
+                        // Get raw value from database
                         $rawValue = $record->getRawOriginal('created_at');
                         if (!$rawValue) {
                             return 'N/A';
                         }
                         try {
                             $carbon = Carbon::parse($rawValue);
-                            // Convert to BS format for display
-                            return NepalDateService::toBS($carbon);
+                            // Display in AD format only (date without time)
+                            return $carbon->format('Y-m-d');
                         } catch (\Exception $e) {
                             return $rawValue;
                         }
@@ -69,15 +68,15 @@ class ViewVendor extends ViewRecord
                 Placeholder::make('updated_at')
                     ->label('Last Updated')
                     ->content(function ($record) {
-                        // Get raw value from database to avoid double BS conversion
+                        // Get raw value from database
                         $rawValue = $record->getRawOriginal('updated_at');
                         if (!$rawValue) {
                             return 'N/A';
                         }
                         try {
                             $carbon = Carbon::parse($rawValue);
-                            // Convert to BS format for display
-                            return NepalDateService::toBS($carbon);
+                            // Display in AD format only (date without time)
+                            return $carbon->format('Y-m-d');
                         } catch (\Exception $e) {
                             return $rawValue;
                         }

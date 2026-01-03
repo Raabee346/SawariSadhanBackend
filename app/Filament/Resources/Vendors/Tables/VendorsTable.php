@@ -59,11 +59,11 @@ class VendorsTable
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('created_at')
-                    ->dateTime()
+                    ->date('Y-m-d')
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->date('Y-m-d')
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])

@@ -99,7 +99,59 @@ class VehicleResource extends Resource
                 TextInput::make('last_renewed_date')
                     ->label('Last Renewed Date (BS)')
                     ->placeholder('YYYY-MM-DD (e.g., 2081-05-15)')
-                    ->helperText('Enter date in Bikram Sambat format'),
+                    ->helperText('Enter date in Bikram Sambat format (YYYY-MM-DD). Expiry date will be auto-calculated below.')
+                    ->live() // Makes the field reactive
+                    ->afterStateUpdated(function ($state, $set, $get) {
+                        // Auto-calculate expiry_date when last_renewed_date changes
+                        if ($state && !empty(trim($state))) {
+                            $trimmedState = trim($state);
+                            
+                            // Validate format first
+                            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $trimmedState)) {
+                                // Invalid format, clear expiry_date
+                                $set('expiry_date', null);
+                                return;
+                            }
+                            
+                            try {
+                                $nepaliDate = new \App\Services\NepaliDate();
+                                $lastRenewedAD = $nepaliDate->convertBsToAd($trimmedState);
+                                
+                                if ($lastRenewedAD) {
+                                    $expiryDate = \Carbon\Carbon::createFromFormat('Y-m-d', $lastRenewedAD)
+                                        ->addYear()
+                                        ->format('Y-m-d');
+                                    $set('expiry_date', $expiryDate);
+                                } else {
+                                    $set('expiry_date', null);
+                                }
+                            } catch (\Exception $e) {
+                                // If conversion fails, clear expiry_date
+                                $set('expiry_date', null);
+                                \Log::warning('Failed to calculate expiry date in Filament form', [
+                                    'last_renewed_date' => $trimmedState,
+                                    'error' => $e->getMessage(),
+                                ]);
+                            }
+                        } else {
+                            // Clear expiry_date if last_renewed_date is empty
+                            $set('expiry_date', null);
+                        }
+                    })
+                    ->rules([
+                        'nullable',
+                        'regex:/^\d{4}-\d{2}-\d{2}$/',
+                    ])
+                    ->validationMessages([
+                        'regex' => 'Date must be in format YYYY-MM-DD (e.g., 2081-05-15)',
+                    ]),
+                TextInput::make('expiry_date')
+                    ->label('Expiry Date (AD)')
+                    ->placeholder('Auto-calculated (e.g., 2027-01-03)')
+                    ->helperText('✅ Automatically calculated from Last Renewed Date + 1 year. Stored in AD format (Gregorian calendar).')
+                    ->disabled()
+                    ->dehydrated() // Important: ensures the value is saved even though disabled
+                    ->visible(fn ($get) => !empty($get('last_renewed_date'))), // Only show when last_renewed_date has a value
                 Select::make('verification_status')
                     ->options([
                         'pending' => 'Pending',
@@ -234,6 +286,28 @@ class VehicleResource extends Resource
                         'rejected' => 'danger',
                         default => 'gray',
                     }),
+                TextColumn::make('last_renewed_date')
+                    ->label('Last Renewed (BS)')
+                    ->searchable()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('expiry_date')
+                    ->label('Expiry Date (AD)')
+                    ->date('Y-m-d')
+                    ->badge()
+                    ->color(function ($state) {
+                        if (!$state) return 'gray';
+                        $expiryDate = \Carbon\Carbon::parse($state);
+                        $today = \Carbon\Carbon::today();
+                        if ($expiryDate->isPast() || $expiryDate->isToday()) {
+                            return 'danger'; // Expired
+                        } elseif ($expiryDate->diffInDays($today) <= 30) {
+                            return 'warning'; // Expiring soon (within 30 days)
+                        }
+                        return 'success'; // Valid
+                    })
+                    ->sortable()
+                    ->searchable(),
                 // TextColumn::make('registration_date')
                 //     ->label('Reg. Date (BS)')
                 //     ->formatStateUsing(fn ($state) => $state ? \App\Services\NepalDateService::toBS(\Carbon\Carbon::parse($state)) : '-')

@@ -192,6 +192,35 @@ class FCMNotificationService
     }
     
     /**
+     * Send notification to an admin
+     */
+    public function sendToAdmin($admin, string $title, string $body, array $data = [])
+    {
+        if (!$this->isAvailable) {
+            Log::debug("FCM not available, skipping notification to admin {$admin->id}");
+            return false;
+        }
+
+        if (!$admin->fcm_token) {
+            Log::warning("No FCM token found for admin {$admin->id}");
+            return false;
+        }
+
+        try {
+            $message = \Kreait\Firebase\Messaging\CloudMessage::withTarget('token', $admin->fcm_token)
+                ->withNotification(\Kreait\Firebase\Messaging\Notification::create($title, $body))
+                ->withData($data);
+
+            $this->messaging->send($message);
+            Log::info("FCM notification sent to admin {$admin->id}");
+            return true;
+        } catch (\Exception $e) {
+            Log::error("Failed to send FCM notification to admin {$admin->id}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Send notification to a vendor (Vendor model)
      */
     public function sendToVendor(Vendor $vendor, string $title, string $body, array $data = [])
@@ -231,12 +260,20 @@ class FCMNotificationService
         }
 
         try {
-            $message = \Kreait\Firebase\Messaging\CloudMessage::withTarget('topic', $topic)
-                ->withNotification(\Kreait\Firebase\Messaging\Notification::create($title, $body))
-                ->withData($data);
+            $message = \Kreait\Firebase\Messaging\CloudMessage::withTarget('topic', $topic);
+            
+            // Only add notification if title or body is provided (for silent data-only messages)
+            if (!empty($title) || !empty($body)) {
+                $message = $message->withNotification(\Kreait\Firebase\Messaging\Notification::create($title ?: 'Sawari Sewa', $body ?: 'Update'));
+            }
+            
+            $message = $message->withData($data);
 
             $this->messaging->send($message);
-            Log::info("FCM notification sent to topic: {$topic}");
+            Log::info("FCM message sent to topic: {$topic}", [
+                'has_notification' => !empty($title) || !empty($body),
+                'data_keys' => array_keys($data),
+            ]);
             return true;
         } catch (\Exception $e) {
             Log::error("Failed to send FCM notification to topic {$topic}: " . $e->getMessage());

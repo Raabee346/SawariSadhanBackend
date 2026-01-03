@@ -8,6 +8,8 @@ use App\Http\Controllers\VehicleController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\FiscalYearController;
 use App\Http\Controllers\RenewalRequestController;
+use App\Http\Controllers\DateConverterController;
+use App\Http\Controllers\AdminFcmTokenController;
 
 // Authentication Routes
 Route::post('/register', [AuthController::class, 'register']);
@@ -36,7 +38,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/provinces', [VehicleController::class, 'provinces']);
         Route::get('/{id}', [VehicleController::class, 'show']);
         Route::post('/{id}', [VehicleController::class, 'update']);
+        Route::delete('/{id}', [VehicleController::class, 'destroy']);
         Route::post('/{id}/calculate', [VehicleController::class, 'calculate']);
+        Route::get('/{id}/check-expiry', [VehicleController::class, 'checkExpiry']);
     });
 
     // Payment Routes
@@ -99,5 +103,22 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::get('/fiscal-years', [FiscalYearController::class, 'index']);
 Route::get('/fiscal-years/current', [FiscalYearController::class, 'current']);
 
+// Date Conversion Route (public, no auth required for date conversion)
+Route::post('/convert-date', [DateConverterController::class, 'convertDate']);
+Route::post('/convert-date-ad-to-bs', [DateConverterController::class, 'convertAdToBs']);
+
 // Khalti Callback (called by Khalti server, no auth required)
 Route::post('/payments/khalti/callback', [PaymentController::class, 'khaltiCallback']);
+
+// Admin FCM Token Update (protected by admin session)
+Route::middleware(['web', 'auth:admin'])->group(function () {
+    Route::post('/admin/fcm-token', [AdminFcmTokenController::class, 'updateFcmToken']);
+    
+    // Admin Notification Management
+    Route::prefix('admin/notifications')->group(function () {
+        Route::get('/', [\App\Http\Controllers\AdminNotificationController::class, 'index']);
+        Route::post('/{id}/read', [\App\Http\Controllers\AdminNotificationController::class, 'markAsRead']);
+        Route::delete('/{id}', [\App\Http\Controllers\AdminNotificationController::class, 'delete']);
+        Route::post('/mark-all-read', [\App\Http\Controllers\AdminNotificationController::class, 'markAllAsRead']);
+    });
+});

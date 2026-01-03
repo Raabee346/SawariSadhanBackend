@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Vehicle;
 use App\Models\Province;
 use App\Services\TaxCalculationService;
+use App\Services\NepalDateService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
@@ -72,6 +74,7 @@ class VehicleController extends Controller
             ], 422);
         }
 
+
         // Store BS date directly (no conversion)
         // Handle file uploads
         $documentFields = [
@@ -102,6 +105,27 @@ class VehicleController extends Controller
             'verification_status' => 'pending',
         ];
 
+        // Calculate expiry_date automatically from last_renewed_date (BS format)
+        if ($request->last_renewed_date) {
+            try {
+                // Convert BS date to AD date using NepaliDate service
+                $nepaliDate = new \App\Services\NepaliDate();
+                $lastRenewedAD = $nepaliDate->convertBsToAd($request->last_renewed_date);
+                
+                // Add 1 year for expiry
+                $expiryDate = \Carbon\Carbon::createFromFormat('Y-m-d', $lastRenewedAD)->addYear()->format('Y-m-d');
+                
+                // Store expiry date in AD format (YYYY-MM-DD)
+                $vehicleData['expiry_date'] = $expiryDate;
+            } catch (\Exception $e) {
+                \Log::warning('Failed to calculate expiry date from last_renewed_date', [
+                    'last_renewed_date' => $request->last_renewed_date,
+                    'error' => $e->getMessage(),
+                ]);
+                // Continue without expiry_date if conversion fails
+            }
+        }
+
         // Upload documents
         foreach ($documentFields as $field) {
             if ($request->hasFile($field)) {
@@ -130,18 +154,23 @@ class VehicleController extends Controller
             ->with(['province', 'verifiedBy', 'payments.fiscalYear'])
             ->findOrFail($id);
 
-        // Format dates to show only date part (YYYY-MM-DD) in response
+        // Get vehicle data as array
         $vehicleData = $vehicle->toArray();
-        if ($vehicle->registration_date) {
-            $vehicleData['registration_date'] = $vehicle->registration_date->format('Y-m-d');
-        }
-        if ($vehicle->last_renewed_date) {
-            $vehicleData['last_renewed_date'] = $vehicle->last_renewed_date->format('Y-m-d');
-        }
         
-        // Add BS dates to response
-        $vehicleData['registration_date_bs'] = $this->toBSDate($vehicle->registration_date);
-        $vehicleData['last_renewed_date_bs'] = $this->toBSDate($vehicle->last_renewed_date);
+        // Format dates to show only date part (remove time if present)
+        // Dates are stored as strings (BS format: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)
+        if (isset($vehicleData['registration_date']) && $vehicleData['registration_date']) {
+            // Remove time part if present
+            $vehicleData['registration_date'] = explode(' ', $vehicleData['registration_date'])[0];
+        }
+        if (isset($vehicleData['last_renewed_date']) && $vehicleData['last_renewed_date']) {
+            // Remove time part if present
+            $vehicleData['last_renewed_date'] = explode(' ', $vehicleData['last_renewed_date'])[0];
+        }
+        if (isset($vehicleData['expiry_date']) && $vehicleData['expiry_date']) {
+            // Remove time part if present (expiry_date is stored in AD format: YYYY-MM-DD)
+            $vehicleData['expiry_date'] = explode(' ', $vehicleData['expiry_date'])[0];
+        }
 
         return response()->json([
             'success' => true,
@@ -210,9 +239,25 @@ class VehicleController extends Controller
             'manufacturing_year',
             'is_commercial',
             'last_renewed_date',
+            'expiry_date',
             'registration_date'
 
         ]);
+
+        // Recalculate expiry_date if last_renewed_date is being updated
+        if ($request->has('last_renewed_date') && $request->last_renewed_date) {
+            try {
+                $nepaliDate = new \App\Services\NepaliDate();
+                $lastRenewedAD = $nepaliDate->convertBsToAd($request->last_renewed_date);
+                $expiryDate = \Carbon\Carbon::createFromFormat('Y-m-d', $lastRenewedAD)->addYear()->format('Y-m-d');
+                $updateData['expiry_date'] = $expiryDate;
+            } catch (\Exception $e) {
+                \Log::warning('Failed to calculate expiry date during update', [
+                    'last_renewed_date' => $request->last_renewed_date,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         // Store BS dates directly (no conversion)
         // Dates are already in $updateData from $request->only()
@@ -313,6 +358,142 @@ class VehicleController extends Controller
         return response()->json([
             'success' => true,
             'data' => $provinces,
+        ]);
+    }
+
+    /**
+     * Check if vehicle's renewal date is expired
+     */
+    public function checkExpiry(Request $request, $id)
+    {
+        $vehicle = Vehicle::where('user_id', $request->user()->id)
+            ->findOrFail($id);
+
+        // Use stored expiry_date if available (more accurate)
+        $expiryDate = null;
+        $lastRenewedDateBS = $vehicle->last_renewed_date;
+        $lastRenewedDateAD = null;
+        
+        if ($vehicle->expiry_date) {
+            // Use stored expiry_date (already in AD format)
+            try {
+                $expiryDate = \Carbon\Carbon::createFromFormat('Y-m-d', $vehicle->expiry_date);
+            } catch (\Exception $e) {
+                \Log::warning('Failed to parse stored expiry_date, will recalculate', [
+                    'expiry_date' => $vehicle->expiry_date,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+        
+        // If expiry_date not available, calculate from last_renewed_date
+        if (!$expiryDate && $lastRenewedDateBS) {
+            try {
+                // Remove time part if present
+                $dateStr = explode(' ', $lastRenewedDateBS)[0];
+                
+                // Convert BS date to AD date using NepaliDate service
+                $nepaliDate = new \App\Services\NepaliDate();
+                $lastRenewedADStr = $nepaliDate->convertBsToAd($dateStr);
+                $lastRenewedDateAD = \Carbon\Carbon::createFromFormat('Y-m-d', $lastRenewedADStr);
+                
+                // Calculate expiry date (last renewed + 1 year)
+                $expiryDate = $lastRenewedDateAD->copy()->addYear();
+            } catch (\Exception $e) {
+                \Log::error('Error converting BS date to AD in checkExpiry', [
+                    'last_renewed_date_bs' => $lastRenewedDateBS,
+                    'error' => $e->getMessage(),
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unable to determine expiry date. Please ensure vehicle has valid renewal date.',
+                ], 400);
+            }
+        }
+        
+        if (!$expiryDate) {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'is_expired' => false,
+                    'message' => 'No renewal date or expiry date found',
+                    'last_renewed_date_bs' => $lastRenewedDateBS,
+                    'expiry_date_ad' => null,
+                    'current_date_ad' => \Carbon\Carbon::today()->format('Y-m-d'),
+                ],
+            ]);
+        }
+
+        try {
+            // Get current date
+            $today = \Carbon\Carbon::today();
+            
+            // Check if expired (expiry date is before or equal to today)
+            $isExpired = $expiryDate->lte($today);
+            
+            // Calculate days expired (if expired) or days until expiry (if not expired)
+            $daysDifference = $today->diffInDays($expiryDate, false); // Negative if expired
+            
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'is_expired' => $isExpired,
+                    'last_renewed_date_bs' => $lastRenewedDateBS ? explode(' ', $lastRenewedDateBS)[0] : null,
+                    'last_renewed_date_ad' => $lastRenewedDateAD ? $lastRenewedDateAD->format('Y-m-d') : null,
+                    'expiry_date_ad' => $expiryDate->format('Y-m-d'),
+                    'current_date_ad' => $today->format('Y-m-d'),
+                    'days_difference' => $daysDifference, // Negative if expired, positive if valid
+                    'message' => $isExpired 
+                        ? "Vehicle renewal expired " . abs($daysDifference) . " days ago" 
+                        : "Vehicle renewal is valid for " . $daysDifference . " more days",
+                ],
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Error checking vehicle expiry', [
+                'vehicle_id' => $id,
+                'expiry_date' => $vehicle->expiry_date,
+                'last_renewed_date' => $lastRenewedDateBS,
+                'error' => $e->getMessage(),
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error checking expiry date: ' . $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /**
+     * Delete a vehicle
+     */
+    public function destroy(Request $request, $id)
+    {
+        $vehicle = Vehicle::where('user_id', $request->user()->id)
+            ->findOrFail($id);
+
+        // Delete associated documents from storage
+        $documentFields = [
+            'rc_firstpage',
+            'rc_ownerdetails',
+            'rc_vehicledetails',
+            'lastrenewdate',
+            'insurance',
+            'owner_ctznship_front',
+            'owner_ctznship_back',
+        ];
+
+        foreach ($documentFields as $field) {
+            if ($vehicle->{$field}) {
+                Storage::disk('public')->delete($vehicle->{$field});
+            }
+        }
+
+        // Delete the vehicle
+        $vehicle->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Vehicle deleted successfully',
         ]);
     }
 }

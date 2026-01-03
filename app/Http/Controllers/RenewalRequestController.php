@@ -734,8 +734,17 @@ class RenewalRequestController extends Controller
             // Assign request to vendor
             $renewalRequest->update($updateData);
 
-            // DO NOT notify other vendors - request will be hidden from their list automatically
-            // Other vendors will see it disappear from available requests without notification
+            // Send silent refresh notification to all vendors (no popup, just triggers refresh)
+            // This ensures accepted requests disappear from all rider dashboards immediately
+            $this->fcmService->sendToAllVendors(
+                '', // Empty title = silent notification
+                '', // Empty body = silent notification
+                [
+                    'type' => 'refresh_available_requests',
+                    'action' => 'refresh',
+                    'renewal_request_id' => (string) $renewalRequest->id,
+                ]
+            );
             
             // Notify user that request was accepted
             $this->fcmService->notifyUserRequestUpdate($renewalRequest, 'assigned');
