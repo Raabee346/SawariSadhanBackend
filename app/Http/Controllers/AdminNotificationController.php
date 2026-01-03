@@ -2,79 +2,202 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\FCMNotificationService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class AdminNotificationController extends Controller
 {
-    protected $fcmService;
-
-    public function __construct(FCMNotificationService $fcmService)
-    {
-        $this->fcmService = $fcmService;
-    }
-
     /**
-     * Broadcast notification to all users or all vendors
+     * Mark a notification as read (but don't delete it)
      */
-    public function broadcast(Request $request)
+    public function markAsRead(Request $request, string $id)
     {
-        $validator = Validator::make($request->all(), [
-            'target' => 'required|in:users,vendors',
-            'title' => 'required|string|max:255',
-            'message' => 'required|string|max:1000',
-            'data' => 'nullable|array',
-        ]);
+        $admin = Auth::guard('admin')->user();
 
-        if ($validator->fails()) {
+        if (!$admin) {
             return response()->json([
                 'success' => false,
-                'message' => 'Validation error',
-                'errors' => $validator->errors(),
-            ], 422);
+                'message' => 'Admin not authenticated',
+            ], 401);
         }
 
-        $target = $request->input('target');
-        $title = $request->input('title');
-        $message = $request->input('message');
-        $data = $request->input('data', []);
-
         try {
-            if ($target === 'users') {
-                $success = $this->fcmService->sendToAllUsers($title, $message, $data);
-            } else {
-                $success = $this->fcmService->sendToAllVendors($title, $message, $data);
-            }
+            $notification = DB::table('notifications')
+                ->where('id', $id)
+                ->where('notifiable_type', \App\Models\Admin::class)
+                ->where('notifiable_id', $admin->id)
+                ->first();
 
-            if ($success) {
-                Log::info('Admin broadcast notification sent', [
-                    'target' => $target,
-                    'title' => $title,
-                ]);
-
-                return response()->json([
-                    'success' => true,
-                    'message' => "Notification sent to all {$target} successfully",
-                ]);
-            } else {
+            if (!$notification) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Failed to send notification. FCM service may not be available.',
-                ], 500);
+                    'message' => 'Notification not found',
+                ], 404);
             }
+
+            // Mark as read but don't delete
+            DB::table('notifications')
+                ->where('id', $id)
+                ->update(['read_at' => now()]);
+
+            Log::info('Notification marked as read', [
+                'admin_id' => $admin->id,
+                'notification_id' => $id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Notification marked as read',
+            ]);
         } catch (\Exception $e) {
-            Log::error('Error broadcasting notification', [
+            Log::error('Failed to mark notification as read', [
+                'admin_id' => $admin->id,
+                'notification_id' => $id,
                 'error' => $e->getMessage(),
-                'target' => $target,
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to send notification: ' . $e->getMessage(),
+                'message' => 'Failed to mark notification as read',
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete a notification (permanently remove it)
+     */
+    public function delete(Request $request, string $id)
+    {
+        $admin = Auth::guard('admin')->user();
+
+        if (!$admin) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin not authenticated',
+            ], 401);
+        }
+
+        try {
+            $notification = DB::table('notifications')
+                ->where('id', $id)
+                ->where('notifiable_type', \App\Models\Admin::class)
+                ->where('notifiable_id', $admin->id)
+                ->first();
+
+            if (!$notification) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Notification not found',
+                ], 404);
+            }
+
+            // Permanently delete the notification
+            DB::table('notifications')
+                ->where('id', $id)
+                ->delete();
+
+            Log::info('Notification deleted', [
+                'admin_id' => $admin->id,
+                'notification_id' => $id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Notification deleted',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to delete notification', [
+                'admin_id' => $admin->id,
+                'notification_id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete notification',
+            ], 500);
+        }
+    }
+
+    /**
+     * Mark all notifications as read
+     */
+    public function markAllAsRead(Request $request)
+    {
+        $admin = Auth::guard('admin')->user();
+
+        if (!$admin) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin not authenticated',
+            ], 401);
+        }
+
+        try {
+            DB::table('notifications')
+                ->where('notifiable_type', \App\Models\Admin::class)
+                ->where('notifiable_id', $admin->id)
+                ->whereNull('read_at')
+                ->update(['read_at' => now()]);
+
+            Log::info('All notifications marked as read', [
+                'admin_id' => $admin->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'All notifications marked as read',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to mark all notifications as read', [
+                'admin_id' => $admin->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to mark all notifications as read',
+            ], 500);
+        }
+    }
+
+    /**
+     * Get all notifications (both read and unread)
+     */
+    public function index(Request $request)
+    {
+        $admin = Auth::guard('admin')->user();
+
+        if (!$admin) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin not authenticated',
+            ], 401);
+        }
+
+        try {
+            $notifications = DB::table('notifications')
+                ->where('notifiable_type', \App\Models\Admin::class)
+                ->where('notifiable_id', $admin->id)
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'notifications' => $notifications,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to fetch notifications', [
+                'admin_id' => $admin->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch notifications',
             ], 500);
         }
     }
 }
-

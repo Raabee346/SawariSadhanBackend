@@ -27,7 +27,8 @@ class UserProfile extends Model
     ];
 
     protected $casts = [
-        'date_of_birth' => 'date',
+        // date_of_birth is stored as string (BS format: YYYY-MM-DD, e.g., 2080-05-15)
+        // No date casting to preserve the BS date format exactly as user provides
         'latitude' => 'decimal:8',
         'longitude' => 'decimal:8',
     ];

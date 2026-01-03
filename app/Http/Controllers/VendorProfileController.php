@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\VendorProfile;
 use App\Models\VendorAvailability;
+use App\Models\RenewalRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
@@ -37,9 +38,16 @@ class VendorProfileController extends Controller
                 ], 200);
             }
 
+            // Calculate total_rides dynamically from completed renewal requests
+            $totalRides = RenewalRequest::where('vendor_id', $vendor->id)
+                ->where('status', 'completed')
+                ->count();
+            
             // Convert profile to array safely
             try {
                 $profileData = $profile->toArray();
+                // Override total_rides with dynamic calculation
+                $profileData['total_rides'] = $totalRides;
             } catch (\Exception $e) {
                 \Log::error('Error converting profile to array', [
                     'vendor_id' => $vendor->id,
@@ -80,7 +88,7 @@ class VendorProfileController extends Controller
                     'verification_status' => $profile->verification_status,
                     'rejection_reason' => $profile->rejection_reason,
                     'rating' => $profile->rating,
-                    'total_rides' => $profile->total_rides,
+                    'total_rides' => $totalRides,
                 ];
             }
             

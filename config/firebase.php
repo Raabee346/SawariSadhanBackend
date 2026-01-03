@@ -72,5 +72,23 @@ return [
         'sender_id' => env('FIREBASE_SENDER_ID'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Firebase Web App Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for Firebase Web SDK (for browser/client-side use).
+    | These values are used for FCM web push notifications.
+    |
+    */
+
+    'api_key' => env('FIREBASE_API_KEY', 'AIzaSyBPYfpXqWZViU_g9xaxsgzWiJFr_oNPlDA'),
+    'auth_domain' => env('FIREBASE_AUTH_DOMAIN', 'sawarisewa-34f2e.firebaseapp.com'),
+    'storage_bucket' => env('FIREBASE_STORAGE_BUCKET', 'sawarisewa-34f2e.firebasestorage.app'),
+    'messaging_sender_id' => env('FIREBASE_MESSAGING_SENDER_ID', '92166605836'),
+    'app_id' => env('FIREBASE_APP_ID', '1:92166605836:web:170575d8e5a203029eb229'),
+    'measurement_id' => env('FIREBASE_MEASUREMENT_ID', 'G-KHX5ES3HKF'),
+    'vapid_key' => env('FIREBASE_VAPID_KEY', 'BP455FC6bZgMs6y7vUbXywNbs3H3JGFnhci2W_QhDfZQ5nWpG2Nc62hbZgL9xWyfHP3BN-jxQ4CGIbJT81ftOsA'),
+
 ];
 
