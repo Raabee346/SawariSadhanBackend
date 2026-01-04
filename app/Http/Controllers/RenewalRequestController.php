@@ -1062,7 +1062,13 @@ class RenewalRequestController extends Controller
 
         // Check permissions
         $vendor = $request->user();
-        if ($renewalRequest->vendor_id !== $vendor->id) {
+        // Use == for type coercion (vendor_id might be int, vendor->id might be int or string)
+        if ($renewalRequest->vendor_id != $vendor->id) {
+            Log::warning('Unauthorized document photo upload attempt', [
+                'renewal_request_id' => $id,
+                'request_vendor_id' => $renewalRequest->vendor_id,
+                'current_vendor_id' => $vendor->id,
+            ]);
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized. You can only upload photos for requests you have accepted.',
