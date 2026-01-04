@@ -870,12 +870,30 @@ class RenewalRequestController extends Controller
 
         // Check permissions - only vendor who accepted the request can update workflow
         $vendor = $request->user();
-        if ($renewalRequest->vendor_id !== $vendor->id) {
+        
+        // Use == for type coercion (vendor_id might be int, vendor->id might be int or string)
+        if ($renewalRequest->vendor_id != $vendor->id) {
+            Log::warning('Unauthorized workflow status update attempt', [
+                'renewal_request_id' => $id,
+                'request_vendor_id' => $renewalRequest->vendor_id,
+                'request_vendor_id_type' => gettype($renewalRequest->vendor_id),
+                'current_vendor_id' => $vendor->id,
+                'current_vendor_id_type' => gettype($vendor->id),
+                'vendor_type' => get_class($vendor),
+                'workflow_status' => $request->workflow_status,
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized. You can only update requests you have accepted.',
             ], 403);
         }
+        
+        Log::info('Workflow status update authorized', [
+            'renewal_request_id' => $id,
+            'vendor_id' => $vendor->id,
+            'workflow_status' => $request->workflow_status,
+        ]);
 
         DB::beginTransaction();
         try {
@@ -986,9 +1004,21 @@ class RenewalRequestController extends Controller
                 $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
             }
 
+            // Refresh the model to ensure we have latest data
+            $renewalRequest->refresh();
+            
+            // Load all relationships for the response
             $renewalRequest->load(['vehicle.province', 'payment', 'user.profile', 'vendor.profile', 'fiscalYear']);
 
             DB::commit();
+            
+            Log::info('Workflow status updated successfully', [
+                'renewal_request_id' => $id,
+                'vendor_id' => $vendor->id,
+                'workflow_status' => $request->workflow_status,
+                'status' => $renewalRequest->status,
+                'en_route_at' => $renewalRequest->en_route_at,
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -999,8 +1029,10 @@ class RenewalRequestController extends Controller
             DB::rollBack();
             Log::error('Error updating workflow status', [
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
                 'renewal_request_id' => $id,
-                'vendor_id' => $vendor->id,
+                'vendor_id' => $vendor->id ?? null,
+                'workflow_status' => $request->workflow_status ?? null,
             ]);
             return response()->json([
                 'success' => false,
