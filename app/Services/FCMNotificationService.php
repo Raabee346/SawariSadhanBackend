@@ -226,12 +226,20 @@ class FCMNotificationService
     public function sendToVendor(Vendor $vendor, string $title, string $body, array $data = [])
     {
         if (!$this->isAvailable) {
-            Log::debug("FCM not available, skipping notification to vendor {$vendor->id}");
+            Log::warning("FCM not available, skipping notification to vendor {$vendor->id}");
             return false;
         }
 
-        if (!$vendor->fcm_token) {
-            Log::warning("No FCM token found for vendor {$vendor->id}");
+        // Refresh vendor to ensure we have latest FCM token
+        $vendor->refresh();
+        
+        if (!$vendor->fcm_token || empty(trim($vendor->fcm_token))) {
+            Log::warning("No FCM token found for vendor", [
+                'vendor_id' => $vendor->id,
+                'vendor_name' => $vendor->name,
+                'fcm_token_is_null' => $vendor->fcm_token === null,
+                'fcm_token_is_empty' => $vendor->fcm_token === '',
+            ]);
             return false;
         }
 
@@ -241,10 +249,36 @@ class FCMNotificationService
                 ->withData($data);
 
             $this->messaging->send($message);
-            Log::info("FCM notification sent to vendor {$vendor->id}");
+            Log::info("FCM notification sent to vendor successfully", [
+                'vendor_id' => $vendor->id,
+                'vendor_name' => $vendor->name,
+                'fcm_token_preview' => substr($vendor->fcm_token, 0, 20) . '...',
+            ]);
             return true;
+        } catch (\Kreait\Firebase\Exception\Messaging\InvalidArgument $e) {
+            Log::error("Invalid FCM token for vendor", [
+                'vendor_id' => $vendor->id,
+                'vendor_name' => $vendor->name,
+                'error' => $e->getMessage(),
+            ]);
+            return false;
+        } catch (\Kreait\Firebase\Exception\Messaging\NotFound $e) {
+            Log::error("FCM token not found (vendor may have uninstalled app)", [
+                'vendor_id' => $vendor->id,
+                'vendor_name' => $vendor->name,
+                'error' => $e->getMessage(),
+            ]);
+            // Optionally clear the invalid token
+            // $vendor->update(['fcm_token' => null]);
+            return false;
         } catch (\Exception $e) {
-            Log::error("Failed to send FCM notification to vendor {$vendor->id}: " . $e->getMessage());
+            Log::error("Failed to send FCM notification to vendor", [
+                'vendor_id' => $vendor->id,
+                'vendor_name' => $vendor->name,
+                'error' => $e->getMessage(),
+                'error_class' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return false;
         }
     }
@@ -414,46 +448,81 @@ class FCMNotificationService
                 ]);
                 
                 // Send individual notifications only to vendors within service radius
+                $failedVendors = [];
                 foreach ($vendors as $vendor) {
                     try {
+                        // Ensure vendor has FCM token before attempting to send
+                        if (empty($vendor->fcm_token)) {
+                            Log::warning('Vendor has no FCM token, skipping', [
+                                'vendor_id' => $vendor->id,
+                                'vendor_name' => $vendor->name,
+                            ]);
+                            $failedVendors[] = $vendor->id;
+                            continue;
+                        }
+                        
                         if ($this->sendToVendor($vendor, $title, $body, $data)) {
                             $successCount++;
-                            Log::debug('FCM notification sent to vendor', [
+                            Log::info('FCM notification sent to vendor successfully', [
                                 'vendor_id' => $vendor->id,
+                                'vendor_name' => $vendor->name,
                                 'renewal_request_id' => $renewalRequest->id,
                             ]);
+                        } else {
+                            Log::warning('FCM notification failed for vendor (sendToVendor returned false)', [
+                                'vendor_id' => $vendor->id,
+                                'vendor_name' => $vendor->name,
+                                'renewal_request_id' => $renewalRequest->id,
+                            ]);
+                            $failedVendors[] = $vendor->id;
                         }
                     } catch (\Exception $e) {
-                        Log::error('Failed to send notification to vendor', [
+                        Log::error('Exception while sending notification to vendor', [
                             'vendor_id' => $vendor->id,
+                            'vendor_name' => $vendor->name,
                             'renewal_request_id' => $renewalRequest->id,
                             'error' => $e->getMessage(),
+                            'trace' => $e->getTraceAsString(),
                         ]);
+                        $failedVendors[] = $vendor->id;
                         // Continue with other vendors even if one fails
                     }
                 }
                 
-                // If no vendors were notified and we have location, send to topic as fallback
-                // This ensures notifications are sent even if individual vendor notifications fail
+                // Always send to topic as well to ensure all vendors receive notification
+                // This is a backup in case individual token-based notifications fail
+                // Vendors subscribed to 'vendors' topic will receive it
+                Log::info('Sending notification to vendors topic as backup', [
+                    'renewal_request_id' => $renewalRequest->id,
+                    'individual_notifications_sent' => $successCount,
+                    'failed_vendors' => $failedVendors,
+                ]);
+                $topicSent = $this->sendToTopic('vendors', $title, $body, $data);
+                
+                // If no individual notifications succeeded but we have vendors, log warning
                 if ($successCount === 0 && $vendors->count() > 0) {
-                    Log::warning('No vendors received individual notifications, sending to topic as fallback', [
+                    Log::warning('No vendors received individual notifications, but topic notification sent', [
                         'renewal_request_id' => $renewalRequest->id,
                         'vendors_count' => $vendors->count(),
+                        'failed_vendor_ids' => $failedVendors,
                     ]);
-                    $topicSent = $this->sendToTopic('vendors', $title, $body, $data);
                 }
             }
 
-            Log::info('FCM notification sent for renewal request', [
+            Log::info('FCM notification sent for renewal request - FINAL SUMMARY', [
                 'renewal_request_id' => $renewalRequest->id,
                 'request_lat' => $requestLat,
                 'request_lng' => $requestLng,
-                'vendors_notified' => $successCount,
+                'vendors_found_in_radius' => isset($vendors) ? $vendors->count() : 0,
+                'vendors_notified_individual' => $successCount,
                 'topic_sent' => $topicSent,
                 'has_location' => !empty($requestLat) && !empty($requestLng),
-                'note' => 'Vendors will receive FCM notification which triggers automatic API call to /api/renewal-requests/available',
+                'notification_method' => $topicSent ? 'topic (all vendors subscribed)' : ($successCount > 0 ? 'individual tokens only' : 'failed'),
+                'note' => 'All vendors subscribed to "vendors" topic will receive notification via topic. Individual token notifications sent to ' . $successCount . ' vendors.',
             ]);
 
+            // Return true if topic was sent OR individual notifications succeeded
+            // Topic ensures all vendors receive notification even if individual tokens fail
             return $successCount > 0 || $topicSent;
         } catch (\Exception $e) {
             Log::error('Error sending FCM notification for renewal request', [
@@ -478,10 +547,36 @@ class FCMNotificationService
             ->with('profile')
             ->get();
         
+        Log::info('Getting vendors within radius', [
+            'request_lat' => $latitude,
+            'request_lng' => $longitude,
+            'total_vendors_with_fcm' => $vendors->count(),
+            'vendor_ids' => $vendors->pluck('id')->toArray(),
+            'vendor_fcm_tokens' => $vendors->pluck('fcm_token')->map(function($token) {
+                return $token ? substr($token, 0, 20) . '...' : 'null';
+            })->toArray(),
+        ]);
+        
         $vendorsWithinRadius = collect();
         
         foreach ($vendors as $vendor) {
+            // Refresh profile to ensure we have latest data
+            $vendor->load('profile');
             $profile = $vendor->profile;
+            
+            // Log vendor details for debugging
+            Log::info('Checking vendor for notification', [
+                'vendor_id' => $vendor->id,
+                'vendor_name' => $vendor->name,
+                'has_fcm_token' => !empty($vendor->fcm_token),
+                'fcm_token_preview' => $vendor->fcm_token ? substr($vendor->fcm_token, 0, 20) . '...' : 'null',
+                'has_profile' => $profile !== null,
+                'has_service_lat' => $profile && $profile->service_latitude !== null,
+                'has_service_lng' => $profile && $profile->service_longitude !== null,
+                'service_lat' => $profile ? $profile->service_latitude : null,
+                'service_lng' => $profile ? $profile->service_longitude : null,
+                'service_radius' => $profile ? $profile->service_radius : null,
+            ]);
             
             // If vendor doesn't have profile or service area set, include them anyway
             // This ensures vendors without service area configured still receive notifications
@@ -495,11 +590,22 @@ class FCMNotificationService
                 continue;
             }
             
-            $vendorLat = $profile->service_latitude;
-            $vendorLng = $profile->service_longitude;
+            $vendorLat = (float) $profile->service_latitude;
+            $vendorLng = (float) $profile->service_longitude;
             // service_radius is stored in meters, convert to kilometers for comparison
             $radiusMeters = $profile->service_radius ?? 50000; // Default 50000 meters = 50km
             $radius = $radiusMeters / 1000; // Convert meters to kilometers
+            
+            // Validate coordinates
+            if ($vendorLat == 0 || $vendorLng == 0 || abs($vendorLat) > 90 || abs($vendorLng) > 180) {
+                Log::warning('Vendor has invalid service coordinates - including in fallback', [
+                    'vendor_id' => $vendor->id,
+                    'vendor_lat' => $vendorLat,
+                    'vendor_lng' => $vendorLng,
+                ]);
+                $vendorsWithinRadius->push($vendor);
+                continue;
+            }
             
             // Calculate distance using Haversine formula (returns kilometers)
             $distance = $this->calculateDistance($latitude, $longitude, $vendorLat, $vendorLng);
@@ -509,6 +615,7 @@ class FCMNotificationService
                 $vendorsWithinRadius->push($vendor);
                 Log::info('Vendor within service radius - will receive notification', [
                     'vendor_id' => $vendor->id,
+                    'vendor_name' => $vendor->name,
                     'request_lat' => $latitude,
                     'request_lng' => $longitude,
                     'vendor_lat' => $vendorLat,
@@ -520,6 +627,7 @@ class FCMNotificationService
             } else {
                 Log::info('Vendor outside service radius - will NOT receive notification', [
                     'vendor_id' => $vendor->id,
+                    'vendor_name' => $vendor->name,
                     'request_lat' => $latitude,
                     'request_lng' => $longitude,
                     'vendor_lat' => $vendorLat,
@@ -531,6 +639,12 @@ class FCMNotificationService
             }
         }
         
+        Log::info('Vendors filtered by radius', [
+            'total_vendors' => $vendors->count(),
+            'vendors_within_radius' => $vendorsWithinRadius->count(),
+            'vendor_ids_within_radius' => $vendorsWithinRadius->pluck('id')->toArray(),
+        ]);
+        
         return $vendorsWithinRadius;
     }
     
@@ -540,6 +654,23 @@ class FCMNotificationService
      */
     private function calculateDistance($lat1, $lon1, $lat2, $lon2)
     {
+        // Validate input coordinates
+        if (!is_numeric($lat1) || !is_numeric($lon1) || !is_numeric($lat2) || !is_numeric($lon2)) {
+            Log::error('Invalid coordinates for distance calculation', [
+                'lat1' => $lat1,
+                'lon1' => $lon1,
+                'lat2' => $lat2,
+                'lon2' => $lon2,
+            ]);
+            return PHP_INT_MAX; // Return very large distance if invalid
+        }
+        
+        // Convert to float to ensure proper calculation
+        $lat1 = (float) $lat1;
+        $lon1 = (float) $lon1;
+        $lat2 = (float) $lat2;
+        $lon2 = (float) $lon2;
+        
         $earthRadius = 6371; // Earth's radius in kilometers
         
         $dLat = deg2rad($lat2 - $lat1);
@@ -551,7 +682,17 @@ class FCMNotificationService
         
         $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
         
-        return $earthRadius * $c;
+        $distance = $earthRadius * $c;
+        
+        Log::debug('Distance calculated', [
+            'lat1' => $lat1,
+            'lon1' => $lon1,
+            'lat2' => $lat2,
+            'lon2' => $lon2,
+            'distance_km' => round($distance, 2),
+        ]);
+        
+        return $distance;
     }
 
     /**
