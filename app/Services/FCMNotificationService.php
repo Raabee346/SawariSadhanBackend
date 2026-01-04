@@ -244,9 +244,17 @@ class FCMNotificationService
         }
 
         try {
+            // Create message with both notification and data payload
+            // When app is in background, Android shows notification automatically
+            // When app is in foreground, onMessageReceived is called
+            // Data payload ensures the app can process the notification even when in background
             $message = \Kreait\Firebase\Messaging\CloudMessage::withTarget('token', $vendor->fcm_token)
                 ->withNotification(\Kreait\Firebase\Messaging\Notification::create($title, $body))
-                ->withData($data);
+                ->withData($data)
+                // Set priority to high to ensure delivery
+                ->withAndroidConfig(\Kreait\Firebase\Messaging\AndroidConfig::fromArray([
+                    'priority' => 'high',
+                ]));
 
             $this->messaging->send($message);
             Log::info("FCM notification sent to vendor successfully", [
@@ -301,7 +309,11 @@ class FCMNotificationService
                 $message = $message->withNotification(\Kreait\Firebase\Messaging\Notification::create($title ?: 'Sawari Sewa', $body ?: 'Update'));
             }
             
-            $message = $message->withData($data);
+            $message = $message->withData($data)
+                // Set priority to high to ensure delivery
+                ->withAndroidConfig(\Kreait\Firebase\Messaging\AndroidConfig::fromArray([
+                    'priority' => 'high',
+                ]));
 
             $this->messaging->send($message);
             Log::info("FCM message sent to topic: {$topic}", [
