@@ -1453,6 +1453,7 @@ class RenewalRequestController extends Controller
 
     /**
      * Update FCM token
+     * Works for both users and vendors
      */
     public function updateFcmToken(Request $request)
     {
@@ -1468,8 +1469,26 @@ class RenewalRequestController extends Controller
             ], 422);
         }
 
-        $request->user()->update([
+        $user = $request->user();
+        $userType = get_class($user);
+        
+        Log::info('Updating FCM token', [
+            'user_id' => $user->id,
+            'user_type' => $userType,
+            'fcm_token_preview' => substr($request->fcm_token, 0, 20) . '...',
+        ]);
+
+        $user->update([
             'fcm_token' => $request->fcm_token,
+        ]);
+        
+        // Refresh to verify token was saved
+        $user->refresh();
+        
+        Log::info('FCM token updated successfully', [
+            'user_id' => $user->id,
+            'user_type' => $userType,
+            'token_saved' => !empty($user->fcm_token),
         ]);
 
         return response()->json([
