@@ -26,10 +26,16 @@ class VehicleController extends Controller
      */
     public function index(Request $request)
     {
+        // Always fetch fresh data from database (no caching to ensure latest vehicle data)
         $vehicles = Vehicle::where('user_id', $request->user()->id)
             ->with(['province', 'verifiedBy'])
             ->latest()
             ->get();
+        
+        // Refresh each vehicle to ensure we have the latest data from database
+        foreach ($vehicles as $vehicle) {
+            $vehicle->refresh();
+        }
 
         return response()->json([
             'success' => true,
@@ -150,9 +156,13 @@ class VehicleController extends Controller
      */
     public function show(Request $request, $id)
     {
+        // Always fetch fresh data from database (no caching to ensure latest vehicle data)
         $vehicle = Vehicle::where('user_id', $request->user()->id)
             ->with(['province', 'verifiedBy', 'payments.fiscalYear'])
             ->findOrFail($id);
+        
+        // Refresh vehicle to ensure we have the latest data from database
+        $vehicle->refresh();
 
         // Get vehicle data as array
         $vehicleData = $vehicle->toArray();

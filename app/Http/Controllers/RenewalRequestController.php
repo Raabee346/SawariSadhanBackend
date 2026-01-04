@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Cache;
 
 class RenewalRequestController extends Controller
 {
@@ -928,11 +929,13 @@ class RenewalRequestController extends Controller
                         // This is pickup arrival
                         $statusMessage = 'Rider has arrived at pickup location';
                         // Only notify if not already notified (prevent duplicates)
-                        // Check if we've already sent arrival notification
-                        $shouldNotifyArrived = true; // Can add timestamp check if needed
+                        // Check if arrived_at is already set to prevent duplicate notifications
+                        $shouldNotifyArrived = $renewalRequest->arrived_at === null;
+                        if ($shouldNotifyArrived) {
+                            $updateData['arrived_at'] = now();
+                        }
                         $isArrivedDropoff = false;
                     }
-                    // No database update needed, just notification
                     break;
                 case 'document_picked_up':
                     // Only update if not already set (prevent duplicate notifications)
@@ -956,8 +959,12 @@ class RenewalRequestController extends Controller
                     $statusMessage = 'Processing at Yatayat is complete';
                     break;
                 case 'en_route_dropoff':
-                    // Rider is en route for dropoff - notify user
-                    // No database update needed, just notification
+                    // Rider is en route for dropoff - set timestamp and notify user
+                    // Only update if not already set (prevent duplicate notifications)
+                    $shouldNotifyEnRouteDropoff = $renewalRequest->en_route_dropoff_at === null;
+                    if ($shouldNotifyEnRouteDropoff) {
+                        $updateData['en_route_dropoff_at'] = now();
+                    }
                     $statusMessage = 'Rider is en route for drop-off';
                     break;
                 case 'arrived_dropoff':
@@ -995,6 +1002,12 @@ class RenewalRequestController extends Controller
                                 'last_renewed_date' => $lastRenewedDateBS,
                                 'expiry_date' => $expiryDateAD,
                             ]);
+                            
+                            // Refresh vehicle to ensure latest data is available
+                            $vehicle->refresh();
+                            
+                            // Clear vehicle from cache to ensure fresh data on next fetch
+                            \Cache::forget('vehicle_' . $vehicle->id);
                             
                             Log::info('Vehicle dates updated after renewal completion', [
                                 'vehicle_id' => $vehicle->id,
@@ -1045,7 +1058,7 @@ class RenewalRequestController extends Controller
                     }
                 } else {
                     // This is pickup arrival - send arrived notification
-                    // Only notify once - check if already notified
+                    // Only notify once - check if already notified (arrived_at was null before update)
                     if (isset($shouldNotifyArrived) && $shouldNotifyArrived && !$renewalRequest->document_picked_up_at) {
                         $renewalRequest->refresh();
                         $this->fcmService->notifyUserRequestUpdate($renewalRequest, 'arrived');
@@ -1053,8 +1066,10 @@ class RenewalRequestController extends Controller
                             'renewal_request_id' => $renewalRequest->id,
                         ]);
                     } else {
-                        \Log::info('Skipping notification for arrived (pickup) - already picked up or notified', [
+                        \Log::info('Skipping notification for arrived (pickup) - already notified or documents picked up', [
                             'renewal_request_id' => $renewalRequest->id,
+                            'arrived_at' => $renewalRequest->arrived_at,
+                            'document_picked_up_at' => $renewalRequest->document_picked_up_at,
                         ]);
                     }
                 }
@@ -1069,9 +1084,15 @@ class RenewalRequestController extends Controller
                     ]);
                 }
             } else if ($request->workflow_status === 'en_route_dropoff') {
-                // Always notify for dropoff en route
-                $renewalRequest->refresh();
-                $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
+                // Only notify if this is the first time (checked before update)
+                if (isset($shouldNotifyEnRouteDropoff) && $shouldNotifyEnRouteDropoff) {
+                    $renewalRequest->refresh();
+                    $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
+                } else {
+                    \Log::info('Skipping notification for en_route_dropoff - already notified', [
+                        'renewal_request_id' => $renewalRequest->id,
+                    ]);
+                }
             } else if ($request->workflow_status === 'arrived_dropoff') {
                 // Only notify for dropoff arrival if not already delivered (prevent duplicates)
                 if (isset($shouldNotifyArrivedDropoff) && $shouldNotifyArrivedDropoff) {
@@ -1101,6 +1122,20 @@ class RenewalRequestController extends Controller
 
             // Refresh the model to ensure we have latest data
             $renewalRequest->refresh();
+            
+            // If vehicle was updated (delivered status), refresh vehicle relationship to get latest data
+            if ($request->workflow_status === 'delivered' && $renewalRequest->vehicle_id) {
+                // Unset the existing vehicle relationship to force fresh load
+                $renewalRequest->unsetRelation('vehicle');
+                
+                // Reload vehicle with fresh data from database
+                $renewalRequest->load('vehicle.province');
+                
+                // Also refresh the vehicle model itself to ensure latest data
+                if ($renewalRequest->vehicle) {
+                    $renewalRequest->vehicle->refresh();
+                }
+            }
             
             // Load all relationships for the response
             $renewalRequest->load(['vehicle.province', 'payment', 'user.profile', 'vendor.profile', 'fiscalYear']);
