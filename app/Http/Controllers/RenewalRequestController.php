@@ -1475,21 +1475,90 @@ class RenewalRequestController extends Controller
         Log::info('Updating FCM token', [
             'user_id' => $user->id,
             'user_type' => $userType,
+            'user_name' => $user->name ?? 'N/A',
             'fcm_token_preview' => substr($request->fcm_token, 0, 20) . '...',
+            'fcm_token_length' => strlen($request->fcm_token),
         ]);
 
-        $user->update([
-            'fcm_token' => $request->fcm_token,
-        ]);
-        
-        // Refresh to verify token was saved
-        $user->refresh();
-        
-        Log::info('FCM token updated successfully', [
-            'user_id' => $user->id,
-            'user_type' => $userType,
-            'token_saved' => !empty($user->fcm_token),
-        ]);
+        try {
+            // First, try using Eloquent update
+            $user->fcm_token = $request->fcm_token;
+            $saved = $user->save();
+            
+            if (!$saved) {
+                Log::warning('Eloquent save() returned false, trying direct DB update', [
+                    'user_id' => $user->id,
+                    'user_type' => $userType,
+                ]);
+                
+                // Fallback: Direct database update
+                $tableName = $user->getTable();
+                $updated = DB::table($tableName)
+                    ->where('id', $user->id)
+                    ->update(['fcm_token' => $request->fcm_token]);
+                
+                if ($updated === 0) {
+                    Log::error('Direct DB update also failed - no rows affected', [
+                        'user_id' => $user->id,
+                        'user_type' => $userType,
+                        'table' => $tableName,
+                    ]);
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Failed to update FCM token in database',
+                    ], 500);
+                }
+                
+                Log::info('FCM token updated via direct DB update', [
+                    'user_id' => $user->id,
+                    'user_type' => $userType,
+                    'rows_affected' => $updated,
+                ]);
+            }
+            
+            // Refresh to verify token was saved
+            $user->refresh();
+            
+            // Verify token was actually saved
+            $tokenSaved = !empty($user->fcm_token) && $user->fcm_token === $request->fcm_token;
+            
+            Log::info('FCM token update result', [
+                'user_id' => $user->id,
+                'user_type' => $userType,
+                'user_name' => $user->name ?? 'N/A',
+                'token_saved' => $tokenSaved,
+                'token_in_db' => !empty($user->fcm_token),
+                'token_matches' => $user->fcm_token === $request->fcm_token,
+                'db_token_preview' => $user->fcm_token ? substr($user->fcm_token, 0, 20) . '...' : 'null',
+                'request_token_preview' => substr($request->fcm_token, 0, 20) . '...',
+            ]);
+            
+            if (!$tokenSaved) {
+                Log::error('FCM token was not saved correctly after update', [
+                    'user_id' => $user->id,
+                    'user_type' => $userType,
+                    'requested_token_preview' => substr($request->fcm_token, 0, 20) . '...',
+                    'saved_token_preview' => $user->fcm_token ? substr($user->fcm_token, 0, 20) . '...' : 'null',
+                    'requested_token_length' => strlen($request->fcm_token),
+                    'saved_token_length' => $user->fcm_token ? strlen($user->fcm_token) : 0,
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'FCM token was not saved correctly',
+                ], 500);
+            }
+        } catch (\Exception $e) {
+            Log::error('Exception while updating FCM token', [
+                'user_id' => $user->id ?? null,
+                'user_type' => $userType ?? 'unknown',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating FCM token: ' . $e->getMessage(),
+            ], 500);
+        }
 
         return response()->json([
             'success' => true,
