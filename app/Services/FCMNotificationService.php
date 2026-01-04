@@ -501,23 +501,29 @@ class FCMNotificationService
                     }
                 }
                 
-                // Always send to topic as well to ensure all vendors receive notification
-                // This is a backup in case individual token-based notifications fail
-                // Vendors subscribed to 'vendors' topic will receive it
-                Log::info('Sending notification to vendors topic as backup', [
-                    'renewal_request_id' => $renewalRequest->id,
-                    'individual_notifications_sent' => $successCount,
-                    'failed_vendors' => $failedVendors,
-                ]);
-                $topicSent = $this->sendToTopic('vendors', $title, $body, $data);
-                
-                // If no individual notifications succeeded but we have vendors, log warning
+                // Only send to topic if individual notifications failed or no vendors were found
+                // This prevents duplicate notifications (vendors receive both individual + topic)
                 if ($successCount === 0 && $vendors->count() > 0) {
-                    Log::warning('No vendors received individual notifications, but topic notification sent', [
+                    // Individual notifications failed, use topic as fallback
+                    Log::info('Individual notifications failed, sending to vendors topic as fallback', [
                         'renewal_request_id' => $renewalRequest->id,
-                        'vendors_count' => $vendors->count(),
-                        'failed_vendor_ids' => $failedVendors,
+                        'individual_notifications_sent' => $successCount,
+                        'failed_vendors' => $failedVendors,
                     ]);
+                    $topicSent = $this->sendToTopic('vendors', $title, $body, $data);
+                } else if ($vendors->count() === 0) {
+                    // No vendors found in radius, send to topic to reach all vendors
+                    Log::info('No vendors found in radius, sending to vendors topic', [
+                        'renewal_request_id' => $renewalRequest->id,
+                    ]);
+                    $topicSent = $this->sendToTopic('vendors', $title, $body, $data);
+                } else {
+                    // Individual notifications succeeded, skip topic to avoid duplicates
+                    Log::info('Individual notifications succeeded, skipping topic notification to prevent duplicates', [
+                        'renewal_request_id' => $renewalRequest->id,
+                        'individual_notifications_sent' => $successCount,
+                    ]);
+                    $topicSent = false;
                 }
             }
 

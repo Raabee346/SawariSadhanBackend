@@ -928,8 +928,12 @@ class RenewalRequestController extends Controller
                     $statusMessage = 'Rider is at DoTM office';
                     break;
                 case 'processing_complete':
-                    // Processing at Yatayat is complete - notify user
-                    // No database update needed, just notification
+                    // Processing at Yatayat is complete - set timestamp and notify user
+                    // Only update if not already set (prevent duplicate notifications)
+                    $shouldNotifyProcessingComplete = $renewalRequest->processing_complete_at === null;
+                    if ($shouldNotifyProcessingComplete) {
+                        $updateData['processing_complete_at'] = now();
+                    }
                     $statusMessage = 'Processing at Yatayat is complete';
                     break;
                 case 'en_route_dropoff':
@@ -970,9 +974,15 @@ class RenewalRequestController extends Controller
                 $renewalRequest->refresh(); // Refresh to ensure we have latest data
                 $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
             } else if ($request->workflow_status === 'processing_complete') {
-                // Always notify for processing completion
-                $renewalRequest->refresh();
-                $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
+                // Only notify if this is the first time (checked before update)
+                if (isset($shouldNotifyProcessingComplete) && $shouldNotifyProcessingComplete) {
+                    $renewalRequest->refresh();
+                    $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
+                } else {
+                    \Log::info('Skipping notification for processing_complete - already notified', [
+                        'renewal_request_id' => $renewalRequest->id,
+                    ]);
+                }
             } else if ($request->workflow_status === 'en_route_dropoff') {
                 // Always notify for dropoff en route
                 $renewalRequest->refresh();
