@@ -403,7 +403,7 @@ class FCMNotificationService
                 // If no coordinates, send to all vendors via topic (fallback only)
                 $topicSent = $this->sendToTopic('vendors', $title, $body, $data);
             } else {
-                // Filter vendors by service area radius - ONLY send to vendors within radius
+                // Filter vendors by service area radius - send to vendors within radius
                 $vendors = $this->getVendorsWithinRadius($requestLat, $requestLng);
                 
                 Log::info('Filtered vendors by service area radius', [
@@ -415,17 +415,33 @@ class FCMNotificationService
                 
                 // Send individual notifications only to vendors within service radius
                 foreach ($vendors as $vendor) {
-                    if ($this->sendToVendor($vendor, $title, $body, $data)) {
-                        $successCount++;
-                        Log::debug('FCM notification sent to vendor', [
+                    try {
+                        if ($this->sendToVendor($vendor, $title, $body, $data)) {
+                            $successCount++;
+                            Log::debug('FCM notification sent to vendor', [
+                                'vendor_id' => $vendor->id,
+                                'renewal_request_id' => $renewalRequest->id,
+                            ]);
+                        }
+                    } catch (\Exception $e) {
+                        Log::error('Failed to send notification to vendor', [
                             'vendor_id' => $vendor->id,
                             'renewal_request_id' => $renewalRequest->id,
+                            'error' => $e->getMessage(),
                         ]);
+                        // Continue with other vendors even if one fails
                     }
                 }
                 
-                // DO NOT send to topic when we have location - only send to filtered vendors
-                // This ensures location-based filtering works correctly
+                // If no vendors were notified and we have location, send to topic as fallback
+                // This ensures notifications are sent even if individual vendor notifications fail
+                if ($successCount === 0 && $vendors->count() > 0) {
+                    Log::warning('No vendors received individual notifications, sending to topic as fallback', [
+                        'renewal_request_id' => $renewalRequest->id,
+                        'vendors_count' => $vendors->count(),
+                    ]);
+                    $topicSent = $this->sendToTopic('vendors', $title, $body, $data);
+                }
             }
 
             Log::info('FCM notification sent for renewal request', [
@@ -452,16 +468,13 @@ class FCMNotificationService
     /**
      * Get vendors within service radius of a location
      * Uses Haversine formula to calculate distance
+     * If vendor doesn't have service area set, include them (fallback to show all vendors)
      */
     private function getVendorsWithinRadius($latitude, $longitude)
     {
-        // Get all vendors with FCM tokens and service area set
+        // Get all vendors with FCM tokens
+        // Include vendors with or without service area set
         $vendors = \App\Models\Vendor::whereNotNull('fcm_token')
-            ->whereHas('profile', function ($query) {
-                $query->whereNotNull('service_latitude')
-                      ->whereNotNull('service_longitude')
-                      ->whereNotNull('service_radius');
-            })
             ->with('profile')
             ->get();
         
@@ -469,15 +482,24 @@ class FCMNotificationService
         
         foreach ($vendors as $vendor) {
             $profile = $vendor->profile;
-            if (!$profile) continue;
+            
+            // If vendor doesn't have profile or service area set, include them anyway
+            // This ensures vendors without service area configured still receive notifications
+            if (!$profile || !$profile->service_latitude || !$profile->service_longitude) {
+                Log::info('Vendor without service area - will receive notification (fallback)', [
+                    'vendor_id' => $vendor->id,
+                    'has_profile' => $profile !== null,
+                    'has_service_area' => $profile && $profile->service_latitude && $profile->service_longitude,
+                ]);
+                $vendorsWithinRadius->push($vendor);
+                continue;
+            }
             
             $vendorLat = $profile->service_latitude;
             $vendorLng = $profile->service_longitude;
             // service_radius is stored in meters, convert to kilometers for comparison
             $radiusMeters = $profile->service_radius ?? 50000; // Default 50000 meters = 50km
             $radius = $radiusMeters / 1000; // Convert meters to kilometers
-            
-            if (!$vendorLat || !$vendorLng) continue;
             
             // Calculate distance using Haversine formula (returns kilometers)
             $distance = $this->calculateDistance($latitude, $longitude, $vendorLat, $vendorLng);

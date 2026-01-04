@@ -465,14 +465,18 @@ class RenewalRequestController extends Controller
     {
         $vendor = $request->user();
         
-        // Load profile with service area information - use fresh() to get latest from database
+        // Load profile with service area information - refresh to get latest from database
+        // Use fresh() to ensure we get the latest data, especially after login
         $profile = \App\Models\VendorProfile::where('vendor_id', $vendor->id)->first();
         
-        // If profile doesn't exist, create a default one (but don't save it yet)
+        // If profile doesn't exist, log warning but continue (will show all requests)
         if (!$profile) {
             Log::warning('Vendor profile not found, will show all requests', [
                 'vendor_id' => $vendor->id,
             ]);
+        } else {
+            // Refresh profile to ensure we have latest data
+            $profile->refresh();
         }
         
         Log::info('Vendor fetching available renewal requests', [
@@ -733,23 +737,43 @@ class RenewalRequestController extends Controller
 
             // Assign request to vendor
             $renewalRequest->update($updateData);
+            
+            // Refresh the model to ensure we have the latest data from database
+            $renewalRequest->refresh();
 
             // Send silent refresh notification to all vendors (no popup, just triggers refresh)
             // This ensures accepted requests disappear from all rider dashboards immediately
-            $this->fcmService->sendToAllVendors(
-                '', // Empty title = silent notification
-                '', // Empty body = silent notification
-                [
-                    'type' => 'refresh_available_requests',
-                    'action' => 'refresh',
-                    'renewal_request_id' => (string) $renewalRequest->id,
-                ]
-            );
+            try {
+                $this->fcmService->sendToAllVendors(
+                    '', // Empty title = silent notification
+                    '', // Empty body = silent notification
+                    [
+                        'type' => 'refresh_available_requests',
+                        'action' => 'refresh',
+                        'renewal_request_id' => (string) $renewalRequest->id,
+                    ]
+                );
+            } catch (\Exception $e) {
+                Log::warning('Failed to send refresh notification to vendors', [
+                    'error' => $e->getMessage(),
+                    'renewal_request_id' => $renewalRequest->id,
+                ]);
+                // Don't fail the request acceptance if notification fails
+            }
             
             // Notify user that request was accepted
-            $this->fcmService->notifyUserRequestUpdate($renewalRequest, 'assigned');
+            try {
+                $this->fcmService->notifyUserRequestUpdate($renewalRequest, 'assigned');
+            } catch (\Exception $e) {
+                Log::warning('Failed to notify user about request acceptance', [
+                    'error' => $e->getMessage(),
+                    'renewal_request_id' => $renewalRequest->id,
+                ]);
+                // Don't fail the request acceptance if notification fails
+            }
 
-            $renewalRequest->load(['vehicle.province', 'payment', 'user', 'vendor.profile', 'fiscalYear']);
+            // Load all relationships for the response
+            $renewalRequest->load(['vehicle.province', 'payment', 'user.profile', 'vendor.profile', 'fiscalYear']);
 
             DB::commit();
 
@@ -1272,38 +1296,51 @@ class RenewalRequestController extends Controller
                     'request_user_id' => $renewalRequest->user_id,
                     'current_user_id' => $user->id,
                 ]);
-            } else if ($isVendor) {
+            } else {
+                // Check if user is vendor by comparing vendor_id directly
+                // This is more reliable than checking VendorProfile table
+                $isVendorByRequest = ($renewalRequest->vendor_id === $user->id);
+                
                 // Vendors can view:
-                // 1. Requests they have accepted (vendor_id matches)
+                // 1. Requests they have accepted (vendor_id matches) - including 'assigned', 'in_progress', etc.
                 // 2. Any pending request that hasn't been assigned yet (vendor_id is null)
                 //    This includes all requests that appear in "available" list
-                $hasAccess = ($renewalRequest->vendor_id === $user->id) || 
-                            ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null);
-                
-                \Log::info('Vendor access check', [
-                    'has_access' => $hasAccess,
-                    'vendor_id_matches' => $renewalRequest->vendor_id === $user->id,
-                    'is_pending_and_unassigned' => ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null),
-                    'request_status' => $renewalRequest->status,
-                    'request_vendor_id' => $renewalRequest->vendor_id,
-                    'current_user_id' => $user->id,
-                ]);
-            } else {
-                // Fallback: If vendor check failed but request is pending and unassigned,
-                // allow access (handles edge cases where vendorProfile might not be loaded)
-                if ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null) {
-                    \Log::warning('Vendor check failed but allowing access to pending unassigned request (fallback)', [
-                        'user_id' => $user->id,
-                        'request_id' => $id,
-                    ]);
+                if ($isVendorByRequest) {
+                    // Vendor has accepted this request
                     $hasAccess = true;
-                } else {
-                    \Log::warning('Access denied - user is not vendor and request is not available', [
-                        'user_id' => $user->id,
-                        'request_id' => $id,
+                    \Log::info('Vendor has accepted this request - access granted', [
+                        'vendor_id' => $user->id,
+                        'request_vendor_id' => $renewalRequest->vendor_id,
+                        'request_status' => $renewalRequest->status,
+                    ]);
+                } else if ($isVendor) {
+                    // Vendor is viewing a pending unassigned request
+                    $hasAccess = ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null);
+                    
+                    \Log::info('Vendor access check for pending request', [
+                        'has_access' => $hasAccess,
+                        'is_pending_and_unassigned' => ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null),
                         'request_status' => $renewalRequest->status,
                         'request_vendor_id' => $renewalRequest->vendor_id,
+                        'current_user_id' => $user->id,
                     ]);
+                } else {
+                    // Fallback: If vendor check failed but request is pending and unassigned,
+                    // allow access (handles edge cases where vendorProfile might not be loaded)
+                    if ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null) {
+                        \Log::warning('Vendor check failed but allowing access to pending unassigned request (fallback)', [
+                            'user_id' => $user->id,
+                            'request_id' => $id,
+                        ]);
+                        $hasAccess = true;
+                    } else {
+                        \Log::warning('Access denied - user is not vendor and request is not available', [
+                            'user_id' => $user->id,
+                            'request_id' => $id,
+                            'request_status' => $renewalRequest->status,
+                            'request_vendor_id' => $renewalRequest->vendor_id,
+                        ]);
+                    }
                 }
             }
 
