@@ -1258,30 +1258,38 @@ class RenewalRequestController extends Controller
 
             $user = $request->user();
             
-            // Check if user is vendor by checking VendorProfile table directly
-            // This is more reliable than using the relationship
-            $isVendor = false;
-            try {
-                $vendorProfile = \App\Models\VendorProfile::where('vendor_id', $user->id)->first();
-                $isVendor = $vendorProfile !== null;
-            } catch (\Exception $e) {
-                \Log::warning('Error checking if user is vendor', [
-                    'user_id' => $user->id,
-                    'error' => $e->getMessage()
-                ]);
-                // Default to false if check fails
-                $isVendor = false;
+            // Check if user is a Vendor instance (more reliable than checking VendorProfile)
+            $isVendorInstance = $user instanceof \App\Models\Vendor;
+            $isUserInstance = $user instanceof \App\Models\User;
+            
+            // Also check VendorProfile as fallback (for cases where User model is used for vendors)
+            $isVendorByProfile = false;
+            if (!$isVendorInstance) {
+                try {
+                    $vendorProfile = \App\Models\VendorProfile::where('vendor_id', $user->id)->first();
+                    $isVendorByProfile = $vendorProfile !== null;
+                } catch (\Exception $e) {
+                    \Log::warning('Error checking if user is vendor by profile', [
+                        'user_id' => $user->id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
             }
-            $isUser = !$isVendor;
+            
+            $isVendor = $isVendorInstance || $isVendorByProfile;
 
             // Log permission check details
             \Log::info('Checking access for renewal request', [
                 'request_id' => $id,
                 'user_id' => $user->id,
+                'user_type' => get_class($user),
+                'is_vendor_instance' => $isVendorInstance,
+                'is_vendor_by_profile' => $isVendorByProfile,
                 'is_vendor' => $isVendor,
-                'is_user' => $isUser,
                 'request_status' => $renewalRequest->status,
                 'request_vendor_id' => $renewalRequest->vendor_id,
+                'request_vendor_id_type' => gettype($renewalRequest->vendor_id),
+                'user_id_type' => gettype($user->id),
                 'request_payment_status' => $renewalRequest->payment_status,
                 'request_user_id' => $renewalRequest->user_id,
             ]);
@@ -1290,23 +1298,26 @@ class RenewalRequestController extends Controller
             $hasAccess = false;
 
             // First, check if user owns the request (users should always be able to view their own requests)
-            if ($renewalRequest->user_id === $user->id) {
+            if ($renewalRequest->user_id == $user->id) { // Use == for type coercion
                 $hasAccess = true;
                 \Log::info('User owns the request - access granted', [
                     'request_user_id' => $renewalRequest->user_id,
                     'current_user_id' => $user->id,
                 ]);
             } else {
-                // Check if user is vendor by comparing vendor_id directly
-                // This is more reliable than checking VendorProfile table
-                $isVendorByRequest = ($renewalRequest->vendor_id === $user->id);
+                // Check if vendor has accepted this request
+                // Use == for type coercion (vendor_id might be int, user->id might be int or string)
+                $vendorIdMatches = ($renewalRequest->vendor_id == $user->id);
                 
-                // Vendors can view:
-                // 1. Requests they have accepted (vendor_id matches) - including 'assigned', 'in_progress', etc.
-                // 2. Any pending request that hasn't been assigned yet (vendor_id is null)
-                //    This includes all requests that appear in "available" list
-                if ($isVendorByRequest) {
-                    // Vendor has accepted this request
+                \Log::info('Checking vendor access', [
+                    'vendor_id_matches' => $vendorIdMatches,
+                    'request_vendor_id' => $renewalRequest->vendor_id,
+                    'user_id' => $user->id,
+                    'request_status' => $renewalRequest->status,
+                ]);
+                
+                if ($vendorIdMatches) {
+                    // Vendor has accepted this request - grant access regardless of status
                     $hasAccess = true;
                     \Log::info('Vendor has accepted this request - access granted', [
                         'vendor_id' => $user->id,
@@ -1315,32 +1326,26 @@ class RenewalRequestController extends Controller
                     ]);
                 } else if ($isVendor) {
                     // Vendor is viewing a pending unassigned request
-                    $hasAccess = ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null);
+                    $isPendingAndUnassigned = ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null);
+                    $hasAccess = $isPendingAndUnassigned;
                     
                     \Log::info('Vendor access check for pending request', [
                         'has_access' => $hasAccess,
-                        'is_pending_and_unassigned' => ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null),
+                        'is_pending_and_unassigned' => $isPendingAndUnassigned,
                         'request_status' => $renewalRequest->status,
                         'request_vendor_id' => $renewalRequest->vendor_id,
                         'current_user_id' => $user->id,
                     ]);
                 } else {
-                    // Fallback: If vendor check failed but request is pending and unassigned,
-                    // allow access (handles edge cases where vendorProfile might not be loaded)
-                    if ($renewalRequest->status === 'pending' && $renewalRequest->vendor_id === null) {
-                        \Log::warning('Vendor check failed but allowing access to pending unassigned request (fallback)', [
-                            'user_id' => $user->id,
-                            'request_id' => $id,
-                        ]);
-                        $hasAccess = true;
-                    } else {
-                        \Log::warning('Access denied - user is not vendor and request is not available', [
-                            'user_id' => $user->id,
-                            'request_id' => $id,
-                            'request_status' => $renewalRequest->status,
-                            'request_vendor_id' => $renewalRequest->vendor_id,
-                        ]);
-                    }
+                    // User is not a vendor and doesn't own the request - deny access
+                    \Log::warning('Access denied - user is not vendor and does not own request', [
+                        'user_id' => $user->id,
+                        'user_type' => get_class($user),
+                        'request_id' => $id,
+                        'request_status' => $renewalRequest->status,
+                        'request_vendor_id' => $renewalRequest->vendor_id,
+                        'request_user_id' => $renewalRequest->user_id,
+                    ]);
                 }
             }
 
