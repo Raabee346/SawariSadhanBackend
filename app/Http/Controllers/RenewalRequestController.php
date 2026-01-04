@@ -1134,6 +1134,9 @@ class RenewalRequestController extends Controller
                 // Also refresh the vehicle model itself to ensure latest data
                 if ($renewalRequest->vehicle) {
                     $renewalRequest->vehicle->refresh();
+                    
+                    // Clear vehicle cache to ensure fresh data on next API call
+                    Cache::forget('vehicle_' . $renewalRequest->vehicle_id);
                 }
             }
             
