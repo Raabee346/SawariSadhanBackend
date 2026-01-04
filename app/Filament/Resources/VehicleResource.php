@@ -344,6 +344,9 @@ class VehicleResource extends Resource
                         $record->refresh();
                         $record->load('user'); // Ensure user relationship is loaded
                         
+                        // Clear vehicle cache to ensure fresh data on next API call
+                        \Illuminate\Support\Facades\Cache::forget('vehicle_' . $record->id);
+                        
                         // Send notification to user and refresh vehicle list
                         try {
                             $fcmService = app(FCMNotificationService::class);
