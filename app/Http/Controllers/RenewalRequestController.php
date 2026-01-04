@@ -911,8 +911,27 @@ class RenewalRequestController extends Controller
                     $statusMessage = 'Rider is en route to pickup location';
                     break;
                 case 'arrived':
-                    // Rider has arrived at pickup location - notify user
-                    $statusMessage = 'Rider has arrived at pickup location';
+                    // Determine if this is pickup arrival or dropoff arrival
+                    // If document_picked_up_at is set, this is dropoff arrival
+                    // Otherwise, it's pickup arrival
+                    $isDropoffArrival = $renewalRequest->document_picked_up_at !== null;
+                    
+                    if ($isDropoffArrival) {
+                        // This is dropoff arrival - treat as arrived_dropoff
+                        // Don't process here, let arrived_dropoff case handle it
+                        // But we need to prevent duplicate notification
+                        $statusMessage = 'Rider has arrived for document drop-off';
+                        $shouldNotifyArrivedDropoff = !$renewalRequest->delivered_at;
+                        // Store flag to use in notification logic
+                        $isArrivedDropoff = true;
+                    } else {
+                        // This is pickup arrival
+                        $statusMessage = 'Rider has arrived at pickup location';
+                        // Only notify if not already notified (prevent duplicates)
+                        // Check if we've already sent arrival notification
+                        $shouldNotifyArrived = true; // Can add timestamp check if needed
+                        $isArrivedDropoff = false;
+                    }
                     // No database update needed, just notification
                     break;
                 case 'document_picked_up':
@@ -953,6 +972,44 @@ class RenewalRequestController extends Controller
                     $updateData['status'] = 'completed';
                     $updateData['completed_at'] = now();
                     $statusMessage = 'Documents have been delivered to client';
+                    
+                    // Update vehicle's last_renewed_date in BS format and expiry_date in AD format
+                    try {
+                        $vehicle = $renewalRequest->vehicle;
+                        if ($vehicle) {
+                            // Convert completion date (AD) to BS format
+                            $nepaliDate = new \App\Services\NepaliDate();
+                            $completionDateAD = now()->format('Y-m-d');
+                            $completionDateBS = $nepaliDate->get_nepali_date(
+                                (int) now()->format('Y'),
+                                (int) now()->format('m'),
+                                (int) now()->format('d')
+                            );
+                            $lastRenewedDateBS = sprintf('%04d-%02d-%02d', $completionDateBS['y'], $completionDateBS['m'], $completionDateBS['d']);
+                            
+                            // Calculate expiry date: last_renewed_date (AD) + 1 year
+                            $lastRenewedDateAD = \Carbon\Carbon::createFromFormat('Y-m-d', $completionDateAD);
+                            $expiryDateAD = $lastRenewedDateAD->copy()->addYear()->format('Y-m-d');
+                            
+                            $vehicle->update([
+                                'last_renewed_date' => $lastRenewedDateBS,
+                                'expiry_date' => $expiryDateAD,
+                            ]);
+                            
+                            Log::info('Vehicle dates updated after renewal completion', [
+                                'vehicle_id' => $vehicle->id,
+                                'last_renewed_date_bs' => $lastRenewedDateBS,
+                                'expiry_date_ad' => $expiryDateAD,
+                                'renewal_request_id' => $renewalRequest->id,
+                            ]);
+                        }
+                    } catch (\Exception $e) {
+                        Log::error('Failed to update vehicle dates after renewal completion', [
+                            'renewal_request_id' => $renewalRequest->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                        // Don't fail the request if vehicle update fails
+                    }
                     break;
             }
 
@@ -970,9 +1027,37 @@ class RenewalRequestController extends Controller
                     'renewal_request_id' => $renewalRequest->id,
                 ]);
             } else if ($request->workflow_status === 'arrived') {
-                // Always notify for arrival
-                $renewalRequest->refresh(); // Refresh to ensure we have latest data
-                $this->fcmService->notifyUserRequestUpdate($renewalRequest, $request->workflow_status);
+                // Check if this is pickup or dropoff arrival based on document_picked_up_at
+                $isDropoffArrival = isset($isArrivedDropoff) ? $isArrivedDropoff : ($renewalRequest->document_picked_up_at !== null);
+                
+                if ($isDropoffArrival) {
+                    // This is dropoff arrival - send arrived_dropoff notification
+                    if (isset($shouldNotifyArrivedDropoff) && $shouldNotifyArrivedDropoff) {
+                        $renewalRequest->refresh();
+                        $this->fcmService->notifyUserRequestUpdate($renewalRequest, 'arrived_dropoff');
+                        Log::info('Sent arrived_dropoff notification (arrived status with documents picked up)', [
+                            'renewal_request_id' => $renewalRequest->id,
+                        ]);
+                    } else {
+                        \Log::info('Skipping notification for arrived (dropoff) - already delivered or notified', [
+                            'renewal_request_id' => $renewalRequest->id,
+                        ]);
+                    }
+                } else {
+                    // This is pickup arrival - send arrived notification
+                    // Only notify once - check if already notified
+                    if (isset($shouldNotifyArrived) && $shouldNotifyArrived && !$renewalRequest->document_picked_up_at) {
+                        $renewalRequest->refresh();
+                        $this->fcmService->notifyUserRequestUpdate($renewalRequest, 'arrived');
+                        Log::info('Sent arrived notification (pickup arrival)', [
+                            'renewal_request_id' => $renewalRequest->id,
+                        ]);
+                    } else {
+                        \Log::info('Skipping notification for arrived (pickup) - already picked up or notified', [
+                            'renewal_request_id' => $renewalRequest->id,
+                        ]);
+                    }
+                }
             } else if ($request->workflow_status === 'processing_complete') {
                 // Only notify if this is the first time (checked before update)
                 if (isset($shouldNotifyProcessingComplete) && $shouldNotifyProcessingComplete) {
