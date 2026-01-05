@@ -10,6 +10,7 @@ use App\Http\Controllers\FiscalYearController;
 use App\Http\Controllers\RenewalRequestController;
 use App\Http\Controllers\DateConverterController;
 use App\Http\Controllers\AdminFcmTokenController;
+use App\Http\Controllers\ReminderController;
 
 // Authentication Routes
 Route::post('/register', [AuthController::class, 'register']);
@@ -41,6 +42,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{id}', [VehicleController::class, 'destroy']);
         Route::post('/{id}/calculate', [VehicleController::class, 'calculate']);
         Route::get('/{id}/check-expiry', [VehicleController::class, 'checkExpiry']);
+    });
+
+    // Reminder Routes (Customer only)
+    Route::prefix('reminders')->middleware('customer')->group(function () {
+        Route::get('/', [ReminderController::class, 'index']);
+        Route::post('/', [ReminderController::class, 'store']);
+        Route::get('/{id}', [ReminderController::class, 'show']);
+        Route::put('/{id}', [ReminderController::class, 'update']);
+        Route::delete('/{id}', [ReminderController::class, 'destroy']);
     });
 
     // Payment Routes
