@@ -1023,6 +1023,25 @@ class RenewalRequestController extends Controller
                         ]);
                         // Don't fail the request if vehicle update fails
                     }
+
+                    // Create activity for service completion
+                    try {
+                        // Check if activity already exists to avoid duplicates
+                        $existingActivity = \App\Models\Activity::where('related_id', $renewalRequest->id)
+                            ->where('related_type', 'App\Models\RenewalRequest')
+                            ->where('activity_type', 'service')
+                            ->first();
+                        
+                        if (!$existingActivity) {
+                            \App\Models\Activity::createServiceActivity($renewalRequest);
+                            Log::info('Service activity created', ['renewal_request_id' => $renewalRequest->id]);
+                        }
+                    } catch (\Exception $e) {
+                        Log::error('Failed to create service activity', [
+                            'renewal_request_id' => $renewalRequest->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
                     break;
             }
 
