@@ -11,6 +11,7 @@ use App\Http\Controllers\RenewalRequestController;
 use App\Http\Controllers\DateConverterController;
 use App\Http\Controllers\AdminFcmTokenController;
 use App\Http\Controllers\ReminderController;
+use App\Http\Controllers\ActivityController;
 
 // Authentication Routes
 Route::post('/register', [AuthController::class, 'register']);
@@ -51,6 +52,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{id}', [ReminderController::class, 'show']);
         Route::put('/{id}', [ReminderController::class, 'update']);
         Route::delete('/{id}', [ReminderController::class, 'destroy']);
+    });
+
+    // Activity Routes (Customer only)
+    Route::prefix('activities')->middleware('customer')->group(function () {
+        Route::get('/', [ActivityController::class, 'index']);
+        Route::get('/{id}', [ActivityController::class, 'show']);
     });
 
     // Payment Routes

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Payment;
 use App\Models\Vehicle;
 use App\Models\FiscalYear;
+use App\Models\Activity;
 use App\Services\TaxCalculationService;
 use App\Services\KhaltiPaymentService;
 use Illuminate\Http\Request;
@@ -261,6 +262,17 @@ class PaymentController extends Controller
                         'payment_date' => $payment->payment_date,
                         'verified_in_db' => $savedPayment !== null,
                     ]);
+
+                    // Create activity for payment
+                    try {
+                        Activity::createPaymentActivity($payment);
+                        Log::info('Payment activity created', ['payment_id' => $payment->id]);
+                    } catch (\Exception $e) {
+                        Log::error('Failed to create payment activity', [
+                            'payment_id' => $payment->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
 
                     // Ensure payment data is properly formatted
                     // Helper function to format date safely (handles both Carbon and string)
@@ -705,6 +717,25 @@ class PaymentController extends Controller
             // Note: Renewal request will be created from Android app after payment verification
             // This keeps the payment and request creation separate as requested
             
+            // Create activity for payment
+            try {
+                // Check if activity already exists to avoid duplicates
+                $existingActivity = Activity::where('related_id', $payment->id)
+                    ->where('related_type', 'App\Models\Payment')
+                    ->where('activity_type', 'payment')
+                    ->first();
+                
+                if (!$existingActivity) {
+                    Activity::createPaymentActivity($payment);
+                    Log::info('Payment activity created', ['payment_id' => $payment->id]);
+                }
+            } catch (\Exception $e) {
+                Log::error('Failed to create payment activity', [
+                    'payment_id' => $payment->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+            
             $payment->load(['vehicle.province', 'fiscalYear']);
 
             return response()->json([
@@ -785,6 +816,25 @@ class PaymentController extends Controller
                 if ($vehicle && $fiscalYear) {
                     $vehicle->update([
                         'last_renewed_date' => $fiscalYear->end_date,
+                    ]);
+                }
+
+                // Create activity for payment
+                try {
+                    // Check if activity already exists to avoid duplicates
+                    $existingActivity = Activity::where('related_id', $payment->id)
+                        ->where('related_type', 'App\Models\Payment')
+                        ->where('activity_type', 'payment')
+                        ->first();
+                    
+                    if (!$existingActivity) {
+                        Activity::createPaymentActivity($payment);
+                        Log::info('Payment activity created from callback', ['payment_id' => $payment->id]);
+                    }
+                } catch (\Exception $e) {
+                    Log::error('Failed to create payment activity from callback', [
+                        'payment_id' => $payment->id,
+                        'error' => $e->getMessage(),
                     ]);
                 }
             }
