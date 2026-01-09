@@ -411,7 +411,7 @@ class VehicleController extends Controller
                 'last_renewed_date' => $lastRenewedDateBS,
                 'registration_date' => $lastRenewedDateBS, // Use same as last renewed
                 'expiry_date' => $expiryDate->format('Y-m-d'), // Store in AD format
-                'is_verified' => true, // Mark as verified for calculation
+                'verification_status' => 'approved', // Mark as verified for calculation
                 'owner_name' => 'Estimate', // Required field
                 'registration_number' => 'ESTIMATE', // Required field
             ]);
