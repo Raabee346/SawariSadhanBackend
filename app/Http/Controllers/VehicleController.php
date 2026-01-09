@@ -357,6 +357,95 @@ class VehicleController extends Controller
     }
 
     /**
+     * Calculate tax estimate for any vehicle (standalone calculator)
+     * This endpoint allows users to estimate tax without having a registered vehicle
+     */
+    public function calculateEstimate(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'vehicle_type' => 'required|string',
+            'fuel_type' => 'required|string',
+            'engine_capacity' => 'required|integer|min:1',
+            'province_id' => 'required|exists:provinces,id',
+            'last_renewed_date_bs' => 'required|string', // BS date format: YYYY-MM-DD
+            'include_insurance' => 'nullable|boolean',
+            'fiscal_year_id' => 'nullable|exists:fiscal_years,id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        try {
+            // Convert last_renewed_date from BS to AD using NepaliDate service
+            $nepaliDate = new \App\Services\NepaliDate();
+            $lastRenewedDateBS = $request->input('last_renewed_date_bs');
+            
+            try {
+                $lastRenewedDateAD = $nepaliDate->convertBsToAd($lastRenewedDateBS);
+                $lastRenewedDate = Carbon::createFromFormat('Y-m-d', $lastRenewedDateAD);
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid date format. Please use YYYY-MM-DD format for BS date (e.g., 2080-01-15).',
+                    'error' => $e->getMessage(),
+                ], 400);
+            }
+
+            // Calculate expiry date (last renewed + 1 year in AD)
+            $expiryDate = $lastRenewedDate->copy()->addYear();
+            
+            // Convert expiry date back to BS using NepalDateService (has toBS method)
+            $expiryDateBS = NepalDateService::toBS($expiryDate);
+
+            // Create a temporary vehicle object for calculation
+            $tempVehicle = new Vehicle([
+                'vehicle_type' => $request->input('vehicle_type'),
+                'fuel_type' => $request->input('fuel_type'),
+                'engine_capacity' => $request->input('engine_capacity'),
+                'province_id' => $request->input('province_id'),
+                'last_renewed_date' => $lastRenewedDateBS,
+                'registration_date' => $lastRenewedDateBS, // Use same as last renewed
+                'expiry_date' => $expiryDate->format('Y-m-d'), // Store in AD format
+                'is_verified' => true, // Mark as verified for calculation
+                'owner_name' => 'Estimate', // Required field
+                'registration_number' => 'ESTIMATE', // Required field
+            ]);
+
+            // Set the vehicle's ID to a temporary value (for non-persisted object)
+            $tempVehicle->id = 0;
+
+            $fiscalYearId = $request->input('fiscal_year_id');
+            $includeInsurance = $request->input('include_insurance', true);
+
+            // Perform calculation using the same TaxCalculationService
+            $calculation = $this->taxCalculationService->calculate($tempVehicle, $fiscalYearId, $includeInsurance);
+
+            return response()->json([
+                'success' => true,
+                'data' => $calculation,
+                'message' => 'Tax estimate calculated successfully based on entered details.',
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Tax estimate calculation failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'input' => $request->all(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Tax calculation failed: ' . $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /**
      * Get provinces list
      */
     public function provinces()
