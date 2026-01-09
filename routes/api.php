@@ -45,6 +45,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{id}/check-expiry', [VehicleController::class, 'checkExpiry']);
     });
 
+    // Tax Calculator - Standalone estimation (no registered vehicle required)
+    Route::post('/tax-calculator/estimate', [VehicleController::class, 'calculateEstimate']);
+
     // Reminder Routes (Customer only)
     Route::prefix('reminders')->middleware('customer')->group(function () {
         Route::get('/', [ReminderController::class, 'index']);
