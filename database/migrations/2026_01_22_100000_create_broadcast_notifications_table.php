@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('broadcast_notifications', function (Blueprint $table) {
+        Schema::create('app_notifications', function (Blueprint $table) {
             $table->id();
             $table->string('title');
             $table->text('message');
@@ -28,7 +28,7 @@ return new class extends Migration
         // Pivot table to track which users have read which notifications
         Schema::create('notification_reads', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('broadcast_notification_id')->constrained()->onDelete('cascade');
+            $table->foreignId('app_notification_id')->constrained()->onDelete('cascade');
             $table->unsignedBigInteger('user_id')->nullable();
             $table->unsignedBigInteger('vendor_id')->nullable();
             $table->unsignedBigInteger('admin_id')->nullable();
@@ -36,9 +36,9 @@ return new class extends Migration
             $table->timestamps();
             
             // Indexes
-            $table->index(['broadcast_notification_id', 'user_id']);
-            $table->index(['broadcast_notification_id', 'vendor_id']);
-            $table->index(['broadcast_notification_id', 'admin_id']);
+            $table->index(['app_notification_id', 'user_id']);
+            $table->index(['app_notification_id', 'vendor_id']);
+            $table->index(['app_notification_id', 'admin_id']);
         });
     }
 
@@ -48,6 +48,6 @@ return new class extends Migration
     public function down(): void
     {
         Schema::dropIfExists('notification_reads');
-        Schema::dropIfExists('broadcast_notifications');
+        Schema::dropIfExists('app_notifications');
     }
 };

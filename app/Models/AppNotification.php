@@ -5,7 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class BroadcastNotification extends Model
+class AppNotification extends Model
 {
     use HasFactory;
 
@@ -28,7 +28,7 @@ class BroadcastNotification extends Model
      */
     public function reads()
     {
-        return $this->hasMany(NotificationRead::class, 'broadcast_notification_id');
+        return $this->hasMany(NotificationRead::class, 'app_notification_id');
     }
 
     /**
