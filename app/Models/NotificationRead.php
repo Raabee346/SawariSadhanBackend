@@ -10,7 +10,7 @@ class NotificationRead extends Model
     use HasFactory;
 
     protected $fillable = [
-        'broadcast_notification_id',
+        'app_notification_id',
         'user_id',
         'vendor_id',
         'admin_id',
@@ -26,7 +26,7 @@ class NotificationRead extends Model
      */
     public function notification()
     {
-        return $this->belongsTo(BroadcastNotification::class, 'broadcast_notification_id');
+        return $this->belongsTo(AppNotification::class, 'app_notification_id');
     }
 
     /**

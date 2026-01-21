@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\BroadcastNotification;
+use App\Models\AppNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -25,7 +25,7 @@ class BroadcastNotificationController extends Controller
 
         try {
             // Get notifications for users or all
-            $notifications = BroadcastNotification::whereIn('target_type', ['users', 'all'])
+            $notifications = AppNotification::whereIn('target_type', ['users', 'all'])
                 ->orderBy('created_at', 'desc')
                 ->limit(100)
                 ->get()
@@ -42,7 +42,7 @@ class BroadcastNotificationController extends Controller
                 });
 
             // Get unread count
-            $unreadCount = BroadcastNotification::whereIn('target_type', ['users', 'all'])
+            $unreadCount = AppNotification::whereIn('target_type', ['users', 'all'])
                 ->whereDoesntHave('reads', function ($query) use ($user) {
                     $query->where('user_id', $user->id);
                 })
@@ -82,7 +82,7 @@ class BroadcastNotificationController extends Controller
 
         try {
             // Get notifications for vendors or all
-            $notifications = BroadcastNotification::whereIn('target_type', ['vendors', 'all'])
+            $notifications = AppNotification::whereIn('target_type', ['vendors', 'all'])
                 ->orderBy('created_at', 'desc')
                 ->limit(100)
                 ->get()
@@ -99,7 +99,7 @@ class BroadcastNotificationController extends Controller
                 });
 
             // Get unread count
-            $unreadCount = BroadcastNotification::whereIn('target_type', ['vendors', 'all'])
+            $unreadCount = AppNotification::whereIn('target_type', ['vendors', 'all'])
                 ->whereDoesntHave('reads', function ($query) use ($vendor) {
                     $query->where('vendor_id', $vendor->id);
                 })
@@ -138,7 +138,7 @@ class BroadcastNotificationController extends Controller
         }
 
         try {
-            $notification = BroadcastNotification::find($id);
+            $notification = AppNotification::find($id);
 
             if (!$notification) {
                 return response()->json([
@@ -182,7 +182,7 @@ class BroadcastNotificationController extends Controller
         }
 
         try {
-            $notification = BroadcastNotification::find($id);
+            $notification = AppNotification::find($id);
 
             if (!$notification) {
                 return response()->json([
@@ -226,7 +226,7 @@ class BroadcastNotificationController extends Controller
         }
 
         try {
-            $notifications = BroadcastNotification::whereIn('target_type', ['users', 'all'])
+            $notifications = AppNotification::whereIn('target_type', ['users', 'all'])
                 ->whereDoesntHave('reads', function ($query) use ($user) {
                     $query->where('user_id', $user->id);
                 })
@@ -269,7 +269,7 @@ class BroadcastNotificationController extends Controller
         }
 
         try {
-            $notifications = BroadcastNotification::whereIn('target_type', ['vendors', 'all'])
+            $notifications = AppNotification::whereIn('target_type', ['vendors', 'all'])
                 ->whereDoesntHave('reads', function ($query) use ($vendor) {
                     $query->where('vendor_id', $vendor->id);
                 })

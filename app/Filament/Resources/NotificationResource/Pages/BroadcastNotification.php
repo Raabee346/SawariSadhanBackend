@@ -4,7 +4,7 @@ namespace App\Filament\Resources\NotificationResource\Pages;
 
 use App\Filament\Resources\NotificationResource;
 use App\Services\FCMNotificationService;
-use App\Models\BroadcastNotification;
+use App\Models\AppNotification;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -93,7 +93,7 @@ class BroadcastNotification extends Page implements HasForms
 
         try {
             // First, save notification to database
-            $broadcastNotification = BroadcastNotification::create([
+            $broadcastNotification = AppNotification::create([
                 'title' => $title,
                 'message' => $message,
                 'target_type' => $target,
