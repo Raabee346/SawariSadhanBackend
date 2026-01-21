@@ -40,6 +40,7 @@ class UserProfileController extends Controller
     public function updateOrCreate(Request $request)
     {
         $validator = Validator::make($request->all(), [
+            'name' => 'nullable|string|max:255', // ADDED: Validate name field
             'phone_number' => 'nullable|string|max:15',
             'date_of_birth' => 'nullable|string', // Save as string exactly as user provided, no validation or conversion
             'gender' => 'nullable|in:male,female,other',
@@ -58,7 +59,15 @@ class UserProfileController extends Controller
         }
 
         $user = $request->user();
-        $data = $request->except('profile_picture');
+        
+        // IMPORTANT: Update user name if provided (name belongs to users table, not user_profiles)
+        if ($request->has('name') && !empty($request->name)) {
+            $user->name = $request->name;
+            $user->save();
+        }
+        
+        // Exclude 'name' from profile data (it doesn't belong in user_profiles table)
+        $data = $request->except(['profile_picture', 'name']);
 
         // Handle profile picture upload
         if ($request->hasFile('profile_picture')) {
@@ -78,7 +87,7 @@ class UserProfileController extends Controller
             $data
         );
 
-        // Include user name in the profile response
+        // Include user name in the profile response (now with updated name!)
         $profileData = $profile->toArray();
         $profileData['name'] = $user->name;
 
