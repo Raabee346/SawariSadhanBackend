@@ -12,6 +12,7 @@ use App\Http\Controllers\DateConverterController;
 use App\Http\Controllers\AdminFcmTokenController;
 use App\Http\Controllers\ReminderController;
 use App\Http\Controllers\ActivityController;
+use App\Http\Controllers\BroadcastNotificationController;
 
 // Authentication Routes
 Route::post('/register', [AuthController::class, 'register']);
@@ -31,6 +32,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/profile', [UserProfileController::class, 'updateOrCreate']);
         Route::post('/profile/picture', [UserProfileController::class, 'updateProfilePicture']);
         Route::delete('/profile/picture', [UserProfileController::class, 'deleteProfilePicture']);
+        
+        // User Broadcast Notifications
+        Route::prefix('notifications')->group(function () {
+            Route::get('/', [BroadcastNotificationController::class, 'getUserNotifications']);
+            Route::post('/{id}/read', [BroadcastNotificationController::class, 'markAsReadUser']);
+            Route::post('/mark-all-read', [BroadcastNotificationController::class, 'markAllAsReadUser']);
+        });
     });
 
     // Vehicle Routes
@@ -114,6 +122,13 @@ Route::middleware('auth:sanctum')->group(function () {
         // Status Toggle Routes
         Route::post('/toggle-online', [VendorProfileController::class, 'toggleOnlineStatus']);
         Route::post('/toggle-available', [VendorProfileController::class, 'toggleAvailableStatus']);
+        
+        // Vendor Broadcast Notifications
+        Route::prefix('notifications')->group(function () {
+            Route::get('/', [BroadcastNotificationController::class, 'getVendorNotifications']);
+            Route::post('/{id}/read', [BroadcastNotificationController::class, 'markAsReadVendor']);
+            Route::post('/mark-all-read', [BroadcastNotificationController::class, 'markAllAsReadVendor']);
+        });
     });
 
     
