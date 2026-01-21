@@ -4,6 +4,7 @@ namespace App\Filament\Resources\NotificationResource\Pages;
 
 use App\Filament\Resources\NotificationResource;
 use App\Services\FCMNotificationService;
+use App\Models\BroadcastNotification;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -91,16 +92,32 @@ class BroadcastNotification extends Page implements HasForms
         }
 
         try {
+            // First, save notification to database
+            $broadcastNotification = BroadcastNotification::create([
+                'title' => $title,
+                'message' => $message,
+                'target_type' => $target,
+                'type' => 'admin_broadcast',
+            ]);
+
+            Log::info('Broadcast notification saved to database', [
+                'notification_id' => $broadcastNotification->id,
+                'target' => $target,
+            ]);
+
+            // Then send via FCM
             if ($target === 'users') {
                 // Send as data-only message to ensure onMessageReceived() is called even in background
                 $success = $this->fcmService->sendToAllUsers($title, $message, [
                     'type' => 'admin_broadcast',
                     'target' => 'users',
+                    'notification_id' => (string)$broadcastNotification->id,
                 ], true); // true = data-only message
             } else {
                 $success = $this->fcmService->sendToAllVendors($title, $message, [
                     'type' => 'admin_broadcast',
                     'target' => 'vendors',
+                    'notification_id' => (string)$broadcastNotification->id,
                 ], true); // true = data-only message
             }
 
@@ -108,10 +125,11 @@ class BroadcastNotification extends Page implements HasForms
                 Notification::make()
                     ->title('Notification Sent')
                     ->success()
-                    ->body("Notification successfully sent to all {$target}.")
+                    ->body("Notification successfully sent to all {$target} and saved to database.")
                     ->send();
 
-                Log::info('Admin broadcast notification sent', [
+                Log::info('Admin broadcast notification sent via FCM', [
+                    'notification_id' => $broadcastNotification->id,
                     'target' => $target,
                     'title' => $title,
                 ]);
@@ -125,15 +143,16 @@ class BroadcastNotification extends Page implements HasForms
                 $this->form->fill($this->data);
             } else {
                 Notification::make()
-                    ->title('Failed to Send')
-                    ->danger()
-                    ->body('Failed to send notification. FCM service may not be available.')
+                    ->title('Partially Successful')
+                    ->warning()
+                    ->body('Notification saved to database but FCM delivery may have failed.')
                     ->send();
             }
         } catch (\Exception $e) {
             Log::error('Error broadcasting notification', [
                 'error' => $e->getMessage(),
                 'target' => $target,
+                'trace' => $e->getTraceAsString(),
             ]);
 
             Notification::make()
