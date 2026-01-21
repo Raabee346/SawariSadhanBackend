@@ -6,6 +6,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use App\Services\FCMNotificationService;
+use App\Models\User;
 
 class AdminNotificationController extends Controller
 {
@@ -197,6 +199,77 @@ class AdminNotificationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch notifications',
+            ], 500);
+        }
+    }
+
+    /**
+     * Send broadcast notification to all users
+     */
+    public function sendBroadcast(Request $request)
+    {
+        $admin = Auth::guard('admin')->user();
+
+        if (!$admin) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin not authenticated',
+            ], 401);
+        }
+
+        // Validate request
+        $request->validate([
+            'title' => 'required|string|max:255',
+            'message' => 'required|string|max:1000',
+            'target' => 'required|in:users,vendors,all', // Target audience
+        ]);
+
+        try {
+            $title = $request->input('title');
+            $message = $request->input('message');
+            $target = $request->input('target');
+
+            Log::info('Admin sending broadcast notification', [
+                'admin_id' => $admin->id,
+                'title' => $title,
+                'target' => $target,
+            ]);
+
+            $fcmService = new FCMNotificationService();
+            
+            // Send to appropriate topic based on target
+            if ($target === 'users' || $target === 'all') {
+                $fcmService->sendAdminBroadcast($title, $message, 'users');
+            }
+            
+            if ($target === 'vendors' || $target === 'all') {
+                $fcmService->sendAdminBroadcast($title, $message, 'vendors');
+            }
+
+            Log::info('Broadcast notification sent successfully', [
+                'admin_id' => $admin->id,
+                'target' => $target,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Broadcast notification sent successfully',
+                'data' => [
+                    'title' => $title,
+                    'message' => $message,
+                    'target' => $target,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to send broadcast notification', [
+                'admin_id' => $admin->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to send broadcast notification: ' . $e->getMessage(),
             ], 500);
         }
     }

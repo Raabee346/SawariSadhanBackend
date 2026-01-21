@@ -294,7 +294,7 @@ class FCMNotificationService
     /**
      * Send notification to a topic (broadcast)
      */
-    public function sendToTopic(string $topic, string $title, string $body, array $data = [])
+    public function sendToTopic(string $topic, string $title, string $body, array $data = [], bool $dataOnly = false)
     {
         if (!$this->isAvailable) {
             Log::debug("FCM not available, skipping notification to topic {$topic}");
@@ -304,9 +304,16 @@ class FCMNotificationService
         try {
             $message = \Kreait\Firebase\Messaging\CloudMessage::withTarget('topic', $topic);
             
-            // Only add notification if title or body is provided (for silent data-only messages)
-            if (!empty($title) || !empty($body)) {
+            // For data-only messages (like admin broadcasts), don't add notification payload
+            // This ensures onMessageReceived() is called even when app is in background
+            if (!$dataOnly && (!empty($title) || !empty($body))) {
                 $message = $message->withNotification(\Kreait\Firebase\Messaging\Notification::create($title ?: 'Sawari Sewa', $body ?: 'Update'));
+            }
+            
+            // Add title and body to data payload for data-only messages
+            if ($dataOnly) {
+                $data['title'] = $title ?: 'Sawari Sewa';
+                $data['body'] = $body ?: 'Update';
             }
             
             $message = $message->withData($data)
@@ -317,7 +324,8 @@ class FCMNotificationService
 
             $this->messaging->send($message);
             Log::info("FCM message sent to topic: {$topic}", [
-                'has_notification' => !empty($title) || !empty($body),
+                'data_only' => $dataOnly,
+                'has_notification_payload' => !$dataOnly && (!empty($title) || !empty($body)),
                 'data_keys' => array_keys($data),
             ]);
             return true;
@@ -330,7 +338,7 @@ class FCMNotificationService
     /**
      * Send notification to all users
      */
-    public function sendToAllUsers(string $title, string $body, array $data = [])
+    public function sendToAllUsers(string $title, string $body, array $data = [], bool $dataOnly = false)
     {
         if (!$this->isAvailable) {
             Log::warning('FCM not available, skipping broadcast to all users');
@@ -339,10 +347,12 @@ class FCMNotificationService
 
         try {
             // Send to 'users' topic
-            $success = $this->sendToTopic('users', $title, $body, $data);
+            $success = $this->sendToTopic('users', $title, $body, $data, $dataOnly);
             
             if ($success) {
-                Log::info('Broadcast notification sent to all users via topic');
+                Log::info('Broadcast notification sent to all users via topic', [
+                    'data_only' => $dataOnly,
+                ]);
             }
             
             return $success;
@@ -355,7 +365,7 @@ class FCMNotificationService
     /**
      * Send notification to all vendors
      */
-    public function sendToAllVendors(string $title, string $body, array $data = [])
+    public function sendToAllVendors(string $title, string $body, array $data = [], bool $dataOnly = false)
     {
         if (!$this->isAvailable) {
             Log::warning('FCM not available, skipping broadcast to all vendors');
@@ -364,10 +374,12 @@ class FCMNotificationService
 
         try {
             // Send to 'vendors' topic
-            $success = $this->sendToTopic('vendors', $title, $body, $data);
+            $success = $this->sendToTopic('vendors', $title, $body, $data, $dataOnly);
             
             if ($success) {
-                Log::info('Broadcast notification sent to all vendors via topic');
+                Log::info('Broadcast notification sent to all vendors via topic', [
+                    'data_only' => $dataOnly,
+                ]);
             }
             
             return $success;

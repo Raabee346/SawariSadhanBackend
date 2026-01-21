@@ -92,15 +92,16 @@ class BroadcastNotification extends Page implements HasForms
 
         try {
             if ($target === 'users') {
+                // Send as data-only message to ensure onMessageReceived() is called even in background
                 $success = $this->fcmService->sendToAllUsers($title, $message, [
                     'type' => 'admin_broadcast',
                     'target' => 'users',
-                ]);
+                ], true); // true = data-only message
             } else {
                 $success = $this->fcmService->sendToAllVendors($title, $message, [
                     'type' => 'admin_broadcast',
                     'target' => 'vendors',
-                ]);
+                ], true); // true = data-only message
             }
 
             if ($success) {
