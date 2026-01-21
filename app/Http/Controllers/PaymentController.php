@@ -128,49 +128,31 @@ class PaymentController extends Controller
                 ], 500);
             }
             
-            // Find the specific year calculation
-            $yearCalculation = collect($calculation['calculations'])
-                ->firstWhere('fiscal_year_id', $request->fiscal_year_id);
-
-            if (!$yearCalculation) {
-                DB::rollBack();
-                // Log available fiscal years for debugging
-                $availableFiscalYears = collect($calculation['calculations'])
-                    ->pluck('fiscal_year_id')
-                    ->toArray();
-                
-                Log::error('Calculation not found for fiscal year', [
-                    'requested_fiscal_year_id' => $request->fiscal_year_id,
-                    'available_fiscal_year_ids' => $availableFiscalYears,
-                    'calculations_count' => count($calculation['calculations']),
-                    'user_id' => $user->id,
-                    'vehicle_id' => $request->vehicle_id,
-                ]);
-                
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Calculation not found for the specified fiscal year. Available fiscal years: ' . implode(', ', $availableFiscalYears),
-                ], 404);
-            }
-
+            // Use summary totals from calculation (includes ALL overdue years, not just one)
+            $summary = $calculation['summary'];
+            
             // Calculate amounts matching TaxCalculationService logic:
-            // - Service Fee = 600 default (not calculated from renewal fee + penalty)
-            // - VAT = 13% on service fee only (not on other fees)
+            // - Use summary totals (sum of all overdue years)
+            // - Service Fee = 600 default
+            // - VAT = 13% on service fee only
             // - Total Amount = tax + insurance + renewal_fee + penalty + service_fee + VAT
             
-            $taxAmount = (float) $yearCalculation['tax_amount'];
-            $insuranceAmount = (float) $yearCalculation['insurance_amount'];
-            $renewalFee = (float) $yearCalculation['renewal_fee'];
-            $penaltyAmountFromTax = (float) $yearCalculation['penalty_amount'];
-            $renewalFeePenalty = (float) ($yearCalculation['renewal_fee_penalty'] ?? 0);
-            $penaltyAmount = $penaltyAmountFromTax + $renewalFeePenalty;
+            $taxAmount = (float) $summary['total_tax'];
+            $insuranceAmount = (float) $summary['total_insurance'];
+            $renewalFee = (float) $summary['total_renewal_fee'];
+            $penaltyAmountFromTax = (float) $summary['total_penalty']; // Tax penalty across all years
+            $renewalFeePenalty = (float) $summary['total_renewal_fee_penalty']; // Renewal fee penalty across all years
+            $penaltyAmount = (float) $summary['total_penalty_amount']; // Total penalty (both types, all years)
             
             // Log penalty breakdown for debugging
-            Log::info('Penalty calculation in payment', [
+            Log::info('Payment calculation using summary totals (all overdue years)', [
+                'years_count' => $summary['years_count'],
+                'total_tax' => $taxAmount,
+                'total_renewal_fee' => $renewalFee,
                 'penalty_amount_from_tax' => $penaltyAmountFromTax,
                 'renewal_fee_penalty' => $renewalFeePenalty,
                 'total_penalty_amount' => $penaltyAmount,
-                'days_delayed' => $yearCalculation['days_delayed'] ?? 0,
+                'total_insurance' => $insuranceAmount,
             ]);
             
             // Service fee = 600 default (matching TaxCalculationService)
