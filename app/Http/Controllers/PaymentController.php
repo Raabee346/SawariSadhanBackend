@@ -194,6 +194,15 @@ class PaymentController extends Controller
                 'service_fee' => $serviceFee,
                 'vat_amount' => $vatAmount,
                 'grand_total' => $grandTotal,
+                'calculation_breakdown' => [
+                    'tax' => $taxAmount,
+                    'insurance' => $insuranceAmount,
+                    'renewal_fee' => $renewalFee,
+                    'penalty' => $penaltyAmount,
+                    'service_fee' => $serviceFee,
+                    'vat_on_service' => $vatAmount,
+                    'sum' => $taxAmount + $insuranceAmount + $renewalFee + $penaltyAmount + $serviceFee + $vatAmount,
+                ],
             ]);
             
             try {
@@ -205,6 +214,8 @@ class PaymentController extends Controller
                     'renewal_fee' => $renewalFee,
                     'penalty_amount' => $penaltyAmount,
                     'insurance_amount' => $insuranceAmount,
+                    'service_fee' => $serviceFee,
+                    'vat_amount' => $vatAmount,
                     'total_amount' => $grandTotal, // Save grand total (tax + insurance + renewal_fee + penalty + service_fee + VAT on service fee)
                     'payment_status' => 'pending',
                     'payment_method' => $request->payment_method,
@@ -303,6 +314,8 @@ class PaymentController extends Controller
                         'renewal_fee' => $payment->renewal_fee,
                         'penalty_amount' => $payment->penalty_amount,
                         'insurance_amount' => $payment->insurance_amount,
+                        'service_fee' => $payment->service_fee,
+                        'vat_amount' => $payment->vat_amount,
                         'total_amount' => $payment->total_amount,
                         'payment_status' => $payment->payment_status,
                         'payment_method' => $payment->payment_method,
