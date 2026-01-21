@@ -71,7 +71,8 @@ class BroadcastNotificationController extends Controller
      */
     public function getVendorNotifications(Request $request)
     {
-        $vendor = Auth::guard('vendor')->user();
+        // The 'vendor' middleware already ensures this is a vendor
+        $vendor = $request->user();
 
         if (!$vendor) {
             return response()->json([
@@ -172,7 +173,8 @@ class BroadcastNotificationController extends Controller
      */
     public function markAsReadVendor(Request $request, $id)
     {
-        $vendor = Auth::guard('vendor')->user();
+        // The 'vendor' middleware already ensures this is a vendor
+        $vendor = $request->user();
 
         if (!$vendor) {
             return response()->json([
@@ -259,7 +261,8 @@ class BroadcastNotificationController extends Controller
      */
     public function markAllAsReadVendor(Request $request)
     {
-        $vendor = Auth::guard('vendor')->user();
+        // The 'vendor' middleware already ensures this is a vendor
+        $vendor = $request->user();
 
         if (!$vendor) {
             return response()->json([
