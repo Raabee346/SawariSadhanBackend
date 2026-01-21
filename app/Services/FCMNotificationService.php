@@ -443,11 +443,12 @@ class FCMNotificationService
             $successCount = 0;
             
             if (!$requestLat || !$requestLng) {
-                Log::warning('Renewal request missing pickup coordinates, sending to all vendors via topic', [
+                Log::error('Renewal request missing pickup coordinates - NOT sending notification', [
                     'renewal_request_id' => $renewalRequest->id,
+                    'reason' => 'Requests without valid coordinates cannot be shown to vendors (filtered out by API)',
                 ]);
-                // If no coordinates, send to all vendors via topic (fallback only)
-                $topicSent = $this->sendToTopic('vendors', $title, $body, $data);
+                // Don't send notification if no coordinates - vendors won't see it anyway
+                return false;
             } else {
                 // Filter vendors by service area radius - send to vendors within radius
                 $vendors = $this->getVendorsWithinRadius($requestLat, $requestLng);
