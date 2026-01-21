@@ -172,7 +172,25 @@ class RenewalRequestController extends Controller
             
             // Validate pickup coordinates
             if (!is_numeric($request->pickup_latitude) || !is_numeric($request->pickup_longitude)) {
-                throw new \Exception('Invalid pickup coordinates');
+                throw new \Exception('Invalid pickup coordinates: not numeric');
+            }
+            
+            // Ensure coordinates are not 0,0 (invalid GPS location)
+            $lat = (float) $request->pickup_latitude;
+            $lng = (float) $request->pickup_longitude;
+            
+            if ($lat == 0 && $lng == 0) {
+                throw new \Exception('Invalid pickup coordinates: GPS location not available (0,0). Please enable location services and try again.');
+            }
+            
+            // Validate coordinate ranges
+            if (abs($lat) > 90 || abs($lng) > 180) {
+                throw new \Exception('Invalid pickup coordinates: out of range (lat: ' . $lat . ', lng: ' . $lng . ')');
+            }
+            
+            // Additional check for very small values that might indicate GPS errors
+            if (abs($lat) < 0.0001 && abs($lng) < 0.0001) {
+                throw new \Exception('Invalid pickup coordinates: values too small, GPS may not be working correctly');
             }
             
             // Validate pickup date format - try multiple formats
