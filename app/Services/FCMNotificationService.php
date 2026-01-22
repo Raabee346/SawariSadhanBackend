@@ -597,24 +597,32 @@ class FCMNotificationService
             $vendor->load('profile');
             $profile = $vendor->profile;
             
+            // Double-check is_online status - skip if vendor is offline
+            if (!$profile || !$profile->is_online) {
+                Log::warning('Skipping vendor - OFFLINE or no profile', [
+                    'vendor_id' => $vendor->id,
+                    'vendor_name' => $vendor->name,
+                    'has_profile' => $profile !== null,
+                    'is_online' => $profile ? $profile->is_online : null,
+                ]);
+                continue;
+            }
+            
             // Log vendor details for debugging
             Log::info('Checking ONLINE vendor for notification', [
                 'vendor_id' => $vendor->id,
                 'vendor_name' => $vendor->name,
-                'is_online' => $profile ? $profile->is_online : false,
+                'is_online' => $profile->is_online,
                 'has_fcm_token' => !empty($vendor->fcm_token),
                 'fcm_token_preview' => $vendor->fcm_token ? substr($vendor->fcm_token, 0, 20) . '...' : 'null',
-                'has_profile' => $profile !== null,
-                'has_service_lat' => $profile && $profile->service_latitude !== null,
-                'has_service_lng' => $profile && $profile->service_longitude !== null,
-                'service_lat' => $profile ? $profile->service_latitude : null,
-                'service_lng' => $profile ? $profile->service_longitude : null,
-                'service_radius' => $profile ? $profile->service_radius : null,
+                'service_lat' => $profile->service_latitude,
+                'service_lng' => $profile->service_longitude,
+                'service_radius' => $profile->service_radius,
             ]);
             
-            // If vendor doesn't have profile or service area set, include them anyway
+            // If vendor doesn't have service area set, include them anyway
             // This ensures vendors without service area configured still receive notifications
-            if (!$profile || !$profile->service_latitude || !$profile->service_longitude) {
+            if (!$profile->service_latitude || !$profile->service_longitude) {
                 Log::info('Vendor without service area - will receive notification (fallback)', [
                     'vendor_id' => $vendor->id,
                     'has_profile' => $profile !== null,
