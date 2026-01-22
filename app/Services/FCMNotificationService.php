@@ -391,7 +391,7 @@ class FCMNotificationService
 
     /**
      * Send renewal request notification to vendors
-     * Sends to ALL vendors (online and offline) so they get notified even when not in app
+     * Sends only to ONLINE vendors within service area
      */
     public function sendNewRenewalRequest($renewalRequest)
     {
@@ -572,16 +572,18 @@ class FCMNotificationService
      */
     private function getVendorsWithinRadius($latitude, $longitude)
     {
-        // Get all vendors with FCM tokens
-        // Include vendors with or without service area set
+        // Get only ONLINE vendors with FCM tokens
         $vendors = \App\Models\Vendor::whereNotNull('fcm_token')
             ->with('profile')
+            ->whereHas('profile', function($query) {
+                $query->where('is_online', true);
+            })
             ->get();
         
-        Log::info('Getting vendors within radius', [
+        Log::info('Getting ONLINE vendors within radius', [
             'request_lat' => $latitude,
             'request_lng' => $longitude,
-            'total_vendors_with_fcm' => $vendors->count(),
+            'total_online_vendors_with_fcm' => $vendors->count(),
             'vendor_ids' => $vendors->pluck('id')->toArray(),
             'vendor_fcm_tokens' => $vendors->pluck('fcm_token')->map(function($token) {
                 return $token ? substr($token, 0, 20) . '...' : 'null';
@@ -596,9 +598,10 @@ class FCMNotificationService
             $profile = $vendor->profile;
             
             // Log vendor details for debugging
-            Log::info('Checking vendor for notification', [
+            Log::info('Checking ONLINE vendor for notification', [
                 'vendor_id' => $vendor->id,
                 'vendor_name' => $vendor->name,
+                'is_online' => $profile ? $profile->is_online : false,
                 'has_fcm_token' => !empty($vendor->fcm_token),
                 'fcm_token_preview' => $vendor->fcm_token ? substr($vendor->fcm_token, 0, 20) . '...' : 'null',
                 'has_profile' => $profile !== null,
