@@ -488,19 +488,38 @@ class RenewalRequestController extends Controller
         // Use fresh() to ensure we get the latest data, especially after login
         $profile = \App\Models\VendorProfile::where('vendor_id', $vendor->id)->first();
         
-        // If profile doesn't exist, log warning but continue (will show all requests)
+        // If profile doesn't exist, return empty list
         if (!$profile) {
-            Log::warning('Vendor profile not found, will show all requests', [
+            Log::warning('Vendor profile not found, returning empty list', [
                 'vendor_id' => $vendor->id,
             ]);
-        } else {
-            // Refresh profile to ensure we have latest data
-            $profile->refresh();
+            return response()->json([
+                'success' => true,
+                'available_requests' => [],
+                'message' => 'Please complete your profile first',
+            ]);
         }
         
-        Log::info('Vendor fetching available renewal requests', [
+        // Refresh profile to ensure we have latest data
+        $profile->refresh();
+        
+        // Check if vendor is online - only show requests to online vendors
+        if (!$profile->is_online) {
+            Log::info('Vendor is offline, returning empty list', [
+                'vendor_id' => $vendor->id,
+                'is_online' => $profile->is_online,
+            ]);
+            return response()->json([
+                'success' => true,
+                'available_requests' => [],
+                'message' => 'You are offline. Toggle online to see requests.',
+            ]);
+        }
+        
+        Log::info('ONLINE vendor fetching available renewal requests', [
             'vendor_id' => $vendor->id,
             'vendor_type' => get_class($vendor),
+            'is_online' => $profile->is_online,
             'has_profile' => $profile !== null,
             'has_service_area' => $profile && $profile->service_latitude && $profile->service_longitude,
             'service_latitude' => $profile ? $profile->service_latitude : null,
