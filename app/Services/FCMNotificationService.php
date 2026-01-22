@@ -514,27 +514,34 @@ class FCMNotificationService
                     }
                 }
                 
-                // Only send to topic if individual notifications failed or no vendors were found
-                // This prevents duplicate notifications (vendors receive both individual + topic)
+                // REMOVED: Topic broadcast fallback
+                // Topic notifications reach ALL vendors regardless of online status
+                // This violates the requirement: only ONLINE vendors within radius should be notified
+                
                 if ($successCount === 0 && $vendors->count() > 0) {
-                    // Individual notifications failed, use topic as fallback
-                    Log::info('Individual notifications failed, sending to vendors topic as fallback', [
+                    // Individual notifications failed for all vendors
+                    Log::warning('Individual notifications failed for all online vendors in radius', [
                         'renewal_request_id' => $renewalRequest->id,
-                        'individual_notifications_sent' => $successCount,
+                        'online_vendors_in_radius' => $vendors->count(),
                         'failed_vendors' => $failedVendors,
+                        'action' => 'NOT sending to topic - respecting online/offline status',
                     ]);
-                    $topicSent = $this->sendToTopic('vendors', $title, $body, $data);
+                    $topicSent = false;
                 } else if ($vendors->count() === 0) {
-                    // No vendors found in radius, send to topic to reach all vendors
-                    Log::info('No vendors found in radius, sending to vendors topic', [
+                    // No online vendors found in radius
+                    Log::info('No ONLINE vendors found in radius for renewal request', [
                         'renewal_request_id' => $renewalRequest->id,
+                        'request_lat' => $requestLat,
+                        'request_lng' => $requestLng,
+                        'action' => 'NOT sending to topic - no online vendors available',
                     ]);
-                    $topicSent = $this->sendToTopic('vendors', $title, $body, $data);
+                    $topicSent = false;
                 } else {
-                    // Individual notifications succeeded, skip topic to avoid duplicates
-                    Log::info('Individual notifications succeeded, skipping topic notification to prevent duplicates', [
+                    // Individual notifications succeeded
+                    Log::info('Individual notifications sent to ONLINE vendors successfully', [
                         'renewal_request_id' => $renewalRequest->id,
-                        'individual_notifications_sent' => $successCount,
+                        'notifications_sent' => $successCount,
+                        'online_vendors_in_radius' => $vendors->count(),
                     ]);
                     $topicSent = false;
                 }
