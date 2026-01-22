@@ -24,9 +24,10 @@ class UserProfileController extends Controller
             ], 404);
         }
 
-        // Include user name in the profile response
+        // Include user name and email in the profile response
         $profileData = $profile->toArray();
         $profileData['name'] = $user->name;
+        $profileData['email'] = $user->email;
 
         return response()->json([
             'message' => 'Profile retrieved successfully',
@@ -87,9 +88,10 @@ class UserProfileController extends Controller
             $data
         );
 
-        // Include user name in the profile response (now with updated name!)
+        // Include user name and email in the profile response (now with updated name!)
         $profileData = $profile->toArray();
         $profileData['name'] = $user->name;
+        $profileData['email'] = $user->email;
 
         return response()->json([
             'message' => 'Profile updated successfully',
@@ -126,9 +128,10 @@ class UserProfileController extends Controller
             ['profile_picture' => $path]
         );
 
-        // Include user name in the profile response
+        // Include user name and email in the profile response
         $profileData = $profile->toArray();
         $profileData['name'] = $user->name;
+        $profileData['email'] = $user->email;
 
         return response()->json([
             'message' => 'Profile picture updated successfully',
