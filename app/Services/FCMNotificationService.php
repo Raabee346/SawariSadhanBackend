@@ -572,21 +572,31 @@ class FCMNotificationService
      */
     private function getVendorsWithinRadius($latitude, $longitude)
     {
-        // Get only ONLINE vendors with FCM tokens
-        $vendors = \App\Models\Vendor::whereNotNull('fcm_token')
-            ->with('profile')
-            ->whereHas('profile', function($query) {
-                $query->where('is_online', true);
-            })
+        // Get only ONLINE vendors with FCM tokens using explicit JOIN
+        // This bypasses any Eloquent caching and queries fresh from database
+        $vendors = \App\Models\Vendor::select('vendors.*')
+            ->join('vendor_profiles', 'vendors.id', '=', 'vendor_profiles.vendor_id')
+            ->whereNotNull('vendors.fcm_token')
+            ->where('vendor_profiles.is_online', '=', 1) // Explicit check for online (1 = true in MySQL)
             ->get();
         
-        Log::info('Getting ONLINE vendors within radius', [
+        // Force fresh load of profiles directly from database (no cache)
+        foreach ($vendors as $vendor) {
+            $vendor->setRelation('profile', \App\Models\VendorProfile::where('vendor_id', $vendor->id)->first());
+        }
+        
+        Log::info('Getting ONLINE vendors within radius (EXPLICIT JOIN QUERY)', [
             'request_lat' => $latitude,
             'request_lng' => $longitude,
-            'total_online_vendors_with_fcm' => $vendors->count(),
-            'vendor_ids' => $vendors->pluck('id')->toArray(),
-            'vendor_fcm_tokens' => $vendors->pluck('fcm_token')->map(function($token) {
-                return $token ? substr($token, 0, 20) . '...' : 'null';
+            'total_vendors_found' => $vendors->count(),
+            'vendor_details' => $vendors->map(function($v) {
+                return [
+                    'id' => $v->id,
+                    'name' => $v->name,
+                    'fcm_token_set' => !empty($v->fcm_token),
+                    'is_online_from_profile' => $v->profile ? $v->profile->is_online : null,
+                    'is_online_raw' => $v->profile ? ($v->profile->is_online ? 'TRUE/1' : 'FALSE/0') : 'NO_PROFILE',
+                ];
             })->toArray(),
         ]);
         
