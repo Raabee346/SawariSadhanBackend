@@ -225,13 +225,13 @@ class TaxCalculationService
             'calculations' => $calculations,
             'summary' => [
                 'total_tax' => (float)$totalTax,
-                'total_renewal_fee' => (float)$totalRenewalFee,
+                'total_renewal_fee' => (float)($totalRenewalFee + $totalRenewalFeePenalty), // Renewal fee + renewal fee penalty
                 'total_penalty' => (float)$totalPenalty, // Tax penalty only
                 'total_renewal_fee_penalty' => (float)$totalRenewalFeePenalty, // Renewal fee penalty
                 'total_penalty_amount' => (float)$totalPenaltyAmount, // Total penalty (tax penalty + renewal fee penalty)
                 'total_insurance' => (float)$totalInsurance,
-                'renewal_fee' => (float)$totalRenewalFee, // Individual renewal fee
-                'penalty_amount' => (float)$totalPenaltyAmount, // Total penalty amount (for backward compatibility)
+                'renewal_fee' => (float)($totalRenewalFee + $totalRenewalFeePenalty), // Renewal fee + renewal fee penalty (for display)
+                'penalty_amount' => (float)$totalPenalty, // Tax penalty only (for display)
                 'service_fee' => (float)$serviceFee,
                 'vat_amount' => (float)$vatAmount, // VAT on service fee only (13%)
                 'total_amount' => (float)$totalAmount, // Total payable (tax + insurance + renewal_fee + penalty + service_fee + VAT on service fee)
