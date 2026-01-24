@@ -222,14 +222,14 @@ class Vehicle extends Model
             ]);
 
             foreach ($admins as $admin) {
-                    try {
-                        \Log::info('Sending notification to admin', [
-                            'admin_id' => $admin->id,
-                            'admin_email' => $admin->email,
-                            'has_fcm_token' => !empty($admin->fcm_token),
-                            'vehicle_id' => $vehicle->id,
-                            'type' => $type,
-                        ]);
+                try {
+                    \Log::info('Sending notification to admin', [
+                        'admin_id' => $admin->id,
+                        'admin_email' => $admin->email,
+                        'has_fcm_token' => !empty($admin->fcm_token),
+                        'vehicle_id' => $vehicle->id,
+                        'type' => $type,
+                    ]);
 
                         // Send Filament notification - must use sendToDatabase() + keepAfterClosed() + send()
                         try {
@@ -304,23 +304,22 @@ class Vehicle extends Model
                                 ]);
                             }
                         }
-                    } catch (\Exception $e) {
-                        \Log::error('Failed to send notification to admin', [
-                            'admin_id' => $admin->id,
-                            'vehicle_id' => $vehicle->id,
-                            'error' => $e->getMessage(),
-                            'trace' => $e->getTraceAsString(),
-                        ]);
-                    }
+                } catch (\Exception $e) {
+                    \Log::error('Failed to send notification to admin', [
+                        'admin_id' => $admin->id,
+                        'vehicle_id' => $vehicle->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
                 }
-            } catch (\Exception $e) {
-                \Log::error('Failed to notify admins about vehicle', [
-                    'vehicle_id' => $vehicle->id,
-                    'type' => $type,
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
             }
+        } catch (\Exception $e) {
+            \Log::error('Failed to notify admins about vehicle', [
+                'vehicle_id' => $vehicle->id,
+                'type' => $type,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
         }
     }
 
