@@ -160,35 +160,9 @@ class AuthController extends Controller
     public function logout(Request $request)
     {
         $user = $request->user(); // works for both user & vendor using Sanctum
-        $fcmToken = $request->input('fcm_token');
-
+        
         if ($user) {
-            // Clear specific FCM token if provided, otherwise clear all
-            if ($fcmToken) {
-                $user->fcm_token = null;
-                \Log::info('Clearing specific FCM token on logout', [
-                    'user_id' => $user->id,
-                    'user_type' => $user instanceof \App\Models\User ? 'user' : 'vendor',
-                    'token_preview' => substr($fcmToken, 0, 20) . '...'
-                ]);
-            } else {
-                // No specific token provided, clear any existing token
-                $user->fcm_token = null;
-                \Log::info('Clearing all FCM tokens on logout', [
-                    'user_id' => $user->id,
-                    'user_type' => $user instanceof \App\Models\User ? 'user' : 'vendor'
-                ]);
-            }
-            
-            $user->save();
-            
-            // Delete access token
             $user->currentAccessToken()->delete();
-            
-            \Log::info('User logged out successfully', [
-                'user_id' => $user->id,
-                'user_type' => $user instanceof \App\Models\User ? 'user' : 'vendor'
-            ]);
         }
 
         return response()->json(['message' => 'Logged out successfully']);

@@ -19,11 +19,6 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('/verify-otp', [AuthController::class, 'verifyOtp']);
 Route::post('/login', [AuthController::class, 'login']);
 
-// Mobile-specific route with compression disabled
-Route::middleware(\App\Http\Middleware\DisableCompression::class)->group(function () {
-    Route::post('/mobile-auth', [AuthController::class, 'login']); // Mobile-specific route to bypass bot protection
-});
-
 Route::post('/resend-otp', [AuthController::class, 'resendOtp']);
 
 // Protected Routes
@@ -113,9 +108,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // FCM Token Update (available to both users and vendors)
     Route::post('/fcm-token', [RenewalRequestController::class, 'updateFcmToken']);
-    
-    // Ghost token cleanup (admin only or automated cleanup)
-    Route::post('/cleanup-ghost-tokens', [RenewalRequestController::class, 'cleanupGhostTokens']);
+
     // Vendor Profile Routes
     Route::prefix('vendor')->middleware('vendor')->group(function () {
         Route::get('/profile', [VendorProfileController::class, 'show']);
