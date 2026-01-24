@@ -27,6 +27,14 @@ class Activity extends Model
     ];
 
     /**
+     * Serialize dates to include time
+     */
+    protected function serializeDate(\DateTimeInterface $date): string
+    {
+        return $date->format('Y-m-d H:i:s');
+    }
+
+    /**
      * Get the user that owns the activity.
      */
     public function user()
