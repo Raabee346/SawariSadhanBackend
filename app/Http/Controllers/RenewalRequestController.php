@@ -1017,6 +1017,26 @@ class RenewalRequestController extends Controller
                     $updateData['completed_at'] = now();
                     $statusMessage = 'Documents have been delivered to client';
                     
+                    // Increment vendor's total_rides count
+                    try {
+                        $vendorProfile = \App\Models\VendorProfile::where('vendor_id', $renewalRequest->vendor_id)->first();
+                        if ($vendorProfile) {
+                            $vendorProfile->increment('total_rides');
+                            Log::info('Vendor total rides incremented', [
+                                'vendor_id' => $renewalRequest->vendor_id,
+                                'new_total_rides' => $vendorProfile->total_rides,
+                                'renewal_request_id' => $renewalRequest->id,
+                            ]);
+                        }
+                    } catch (\Exception $e) {
+                        Log::error('Failed to increment vendor total rides', [
+                            'vendor_id' => $renewalRequest->vendor_id,
+                            'renewal_request_id' => $renewalRequest->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                        // Don't fail the request if vendor update fails
+                    }
+                    
                     // Update vehicle's last_renewed_date in BS format and expiry_date in AD format
                     try {
                         $vehicle = $renewalRequest->vehicle;
