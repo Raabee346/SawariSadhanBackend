@@ -161,7 +161,17 @@ class AuthController extends Controller
         $user = $request->user(); // works for both user & vendor using Sanctum
 
         if ($user) {
+            // Clear FCM token from database to stop notifications
+            $user->fcm_token = null;
+            $user->save();
+            
+            // Delete access token
             $user->currentAccessToken()->delete();
+            
+            \Log::info('User logged out and FCM token cleared', [
+                'user_id' => $user->id,
+                'user_type' => $user instanceof \App\Models\User ? 'user' : 'vendor'
+            ]);
         }
 
         return response()->json(['message' => 'Logged out']);

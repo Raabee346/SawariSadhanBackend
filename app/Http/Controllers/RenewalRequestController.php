@@ -1676,7 +1676,7 @@ class RenewalRequestController extends Controller
     public function updateFcmToken(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'fcm_token' => 'required|string',
+            'fcm_token' => 'required|string', // Allow empty string for clearing
         ]);
 
         if ($validator->fails()) {
@@ -1690,17 +1690,21 @@ class RenewalRequestController extends Controller
         $user = $request->user();
         $userType = get_class($user);
         
+        $fcmToken = $request->fcm_token;
+        $isClearing = empty($fcmToken); // Check if clearing token
+        
         Log::info('Updating FCM token', [
             'user_id' => $user->id,
             'user_type' => $userType,
             'user_name' => $user->name ?? 'N/A',
-            'fcm_token_preview' => substr($request->fcm_token, 0, 20) . '...',
-            'fcm_token_length' => strlen($request->fcm_token),
+            'is_clearing' => $isClearing,
+            'fcm_token_preview' => $isClearing ? 'CLEARING' : substr($fcmToken, 0, 20) . '...',
+            'fcm_token_length' => strlen($fcmToken),
         ]);
 
         try {
-            // First, try using Eloquent update
-            $user->fcm_token = $request->fcm_token;
+            // Set token (empty string for clearing, or actual token)
+            $user->fcm_token = $isClearing ? null : $fcmToken;
             $saved = $user->save();
             
             if (!$saved) {
