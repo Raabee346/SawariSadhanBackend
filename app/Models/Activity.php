@@ -4,11 +4,10 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use App\Traits\HasBSTimestamps;
 
 class Activity extends Model
 {
-    use HasFactory, HasBSTimestamps;
+    use HasFactory;
 
     protected $fillable = [
         'user_id',
