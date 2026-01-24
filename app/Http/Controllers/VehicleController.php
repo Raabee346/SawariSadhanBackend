@@ -193,50 +193,54 @@ class VehicleController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $vehicle = Vehicle::where('user_id', $request->user()->id)
-            ->findOrFail($id);
+        try {
+            $vehicle = Vehicle::where('user_id', $request->user()->id)
+                ->findOrFail($id);
 
-        // Allow updates for pending or rejected vehicles
-        // Approved vehicles cannot be updated
-        if ($vehicle->verification_status === 'approved') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Cannot update an approved vehicle. Please contact support if you need to make changes.',
-            ], 403);
-        }
+            // Only allow updates for rejected vehicles
+            // Pending vehicles are awaiting review - cannot be updated
+            // Approved vehicles are verified - cannot be updated
+            if ($vehicle->verification_status !== 'rejected') {
+                $statusMessage = $vehicle->verification_status === 'approved' 
+                    ? 'Cannot update an approved vehicle. Please contact support if you need to make changes.'
+                    : 'Cannot update vehicle. Your vehicle is currently under review. Please wait for admin verification.';
+                    
+                return response()->json([
+                    'success' => false,
+                    'message' => $statusMessage,
+                ], 403);
+            }
 
-        $validator = Validator::make($request->all(), [
-            'province_id' => 'sometimes|exists:provinces,id',
-            'owner_name' => 'sometimes|string|max:255',
-            'registration_number' => ['sometimes', 'string', Rule::unique('vehicles')->ignore($vehicle->id)],
-            'chassis_number' => ['sometimes', 'string', Rule::unique('vehicles')->ignore($vehicle->id)],
-            'vehicle_type' => 'sometimes|in:2W,4W,Commercial,Heavy',
-            'fuel_type' => 'sometimes|in:Petrol,Diesel,Electric',
-            'brand' => 'nullable|string|max:255',
-            'model' => 'nullable|string|max:255',
-            'engine_capacity' => 'sometimes|integer|min:1',
-            'manufacturing_year' => 'nullable|integer|min:1900|max:' . (date('Y') + 1),
-            'registration_date' => 'sometimes|string', // BS date format: YYYY-MM-DD
-            'is_commercial' => 'boolean',
-            'rc_firstpage' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
-            'rc_ownerdetails' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
-            'rc_vehicledetails' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
-            'lastrenewdate' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
-            'insurance' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
-            'owner_ctznship_front' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
-            'owner_ctznship_back' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
-            'last_renewed_date' => 'nullable|string', // BS date format: YYYY-MM-DD
-            'registration_date' => 'nullable|string', // BS date format: YYYY-MM-DD
+            $validator = Validator::make($request->all(), [
+                'province_id' => 'sometimes|exists:provinces,id',
+                'owner_name' => 'sometimes|string|max:255',
+                'registration_number' => ['sometimes', 'string', Rule::unique('vehicles')->ignore($vehicle->id)],
+                'chassis_number' => ['sometimes', 'string', Rule::unique('vehicles')->ignore($vehicle->id)],
+                'vehicle_type' => 'sometimes|in:2W,4W,Commercial,Heavy',
+                'fuel_type' => 'sometimes|in:Petrol,Diesel,Electric',
+                'brand' => 'nullable|string|max:255',
+                'model' => 'nullable|string|max:255',
+                'engine_capacity' => 'sometimes|integer|min:1',
+                'manufacturing_year' => 'nullable|integer|min:1900|max:' . (date('Y') + 1),
+                'is_commercial' => 'boolean',
+                'rc_firstpage' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
+                'rc_ownerdetails' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
+                'rc_vehicledetails' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
+                'lastrenewdate' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
+                'insurance' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
+                'owner_ctznship_front' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
+                'owner_ctznship_back' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
+                'last_renewed_date' => 'nullable|string', // BS date format: YYYY-MM-DD
+                'registration_date' => 'nullable|string', // BS date format: YYYY-MM-DD
+            ]);
 
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation error',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation error',
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
 
         $updateData = $request->only([
             'province_id',
@@ -300,14 +304,13 @@ class VehicleController extends Controller
         }
 
         // Reset verification status to pending when updating a rejected vehicle
-        if ($vehicle->verification_status === 'rejected') {
-            $updateData['verification_status'] = 'pending';
-            $updateData['rejection_reason'] = null;
-            Log::info('Vehicle resubmitted for verification', [
-                'vehicle_id' => $vehicle->id,
-                'user_id' => $request->user()->id,
-            ]);
-        }
+        // Vehicle needs to be re-verified after changes
+        $updateData['verification_status'] = 'pending';
+        $updateData['rejection_reason'] = null;
+        Log::info('Rejected vehicle resubmitted for verification', [
+            'vehicle_id' => $vehicle->id,
+            'user_id' => $request->user()->id,
+        ]);
 
         $vehicle->update($updateData);
         
@@ -315,11 +318,23 @@ class VehicleController extends Controller
         $vehicle->refresh();
         $vehicle->load(['province', 'verifiedBy']);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Vehicle updated successfully',
-            'data' => $vehicle,
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Vehicle updated successfully',
+                'data' => $vehicle,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Vehicle update error', [
+                'vehicle_id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update vehicle: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     /**
