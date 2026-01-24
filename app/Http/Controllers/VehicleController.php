@@ -196,10 +196,12 @@ class VehicleController extends Controller
         $vehicle = Vehicle::where('user_id', $request->user()->id)
             ->findOrFail($id);
 
-        if ($vehicle->verification_status !== 'pending') {
+        // Allow updates for pending or rejected vehicles
+        // Approved vehicles cannot be updated
+        if ($vehicle->verification_status === 'approved') {
             return response()->json([
                 'success' => false,
-                'message' => 'Cannot update vehicle that is already verified or rejected',
+                'message' => 'Cannot update an approved vehicle. Please contact support if you need to make changes.',
             ], 403);
         }
 
@@ -295,6 +297,16 @@ class VehicleController extends Controller
                 $path = $file->store('vehicles/documents', 'public');
                 $updateData[$field] = $path;
             }
+        }
+
+        // Reset verification status to pending when updating a rejected vehicle
+        if ($vehicle->verification_status === 'rejected') {
+            $updateData['verification_status'] = 'pending';
+            $updateData['rejection_reason'] = null;
+            Log::info('Vehicle resubmitted for verification', [
+                'vehicle_id' => $vehicle->id,
+                'user_id' => $request->user()->id,
+            ]);
         }
 
         $vehicle->update($updateData);

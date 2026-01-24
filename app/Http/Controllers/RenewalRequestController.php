@@ -143,6 +143,15 @@ class RenewalRequestController extends Controller
                 throw new \Exception('Vehicle not found with ID: ' . $payment->vehicle_id);
             }
             
+            // Check if vehicle is approved for renewal
+            if ($vehicle->verification_status !== 'approved') {
+                $statusMessage = $vehicle->verification_status === 'pending' 
+                    ? 'Vehicle verification is still pending. Please wait for admin approval.'
+                    : 'Vehicle verification was rejected. Please update your vehicle details and resubmit for approval.';
+                    
+                throw new \Exception($statusMessage);
+            }
+            
             // Verify fiscal year exists
             $fiscalYear = \App\Models\FiscalYear::find($payment->fiscal_year_id);
             if (!$fiscalYear) {
