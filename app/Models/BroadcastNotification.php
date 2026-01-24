@@ -5,9 +5,11 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class AppNotification extends Model
+class BroadcastNotification extends Model
 {
     use HasFactory;
+
+    protected $table = 'app_notifications'; // Using app_notifications table
 
     protected $fillable = [
         'title',
