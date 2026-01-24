@@ -18,6 +18,7 @@ use App\Http\Controllers\BroadcastNotificationController;
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/verify-otp', [AuthController::class, 'verifyOtp']);
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/mobile-auth', [AuthController::class, 'login']); // Mobile-specific route to bypass bot protection
 Route::post('/resend-otp', [AuthController::class, 'resendOtp']);
 
 // Protected Routes
