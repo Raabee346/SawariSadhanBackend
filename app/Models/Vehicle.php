@@ -174,30 +174,73 @@ class Vehicle extends Model
                 'registration_number' => $vehicle->registration_number ?? 'N/A',
             ]);
 
-            try {
-                $admins = \App\Models\Admin::all();
-                
-                \Log::info('Notifying admins about new vehicle', [
-                    'vehicle_id' => $vehicle->id,
-                    'admin_count' => $admins->count(),
-                ]);
+            static::notifyAdminsAboutVehicle($vehicle, 'new');
+        });
 
-                foreach ($admins as $admin) {
+        // Notify admins when a rejected vehicle is resubmitted
+        static::updated(function ($vehicle) {
+            // Only notify if verification_status changed from 'rejected' to 'pending'
+            if ($vehicle->isDirty('verification_status')) {
+                $originalStatus = $vehicle->getOriginal('verification_status');
+                $newStatus = $vehicle->verification_status;
+                
+                \Log::info('=== Vehicle::updated event - status changed ===', [
+                    'vehicle_id' => $vehicle->id,
+                    'original_status' => $originalStatus,
+                    'new_status' => $newStatus,
+                ]);
+                
+                if ($originalStatus === 'rejected' && $newStatus === 'pending') {
+                    \Log::info('Rejected vehicle resubmitted, notifying admins', [
+                        'vehicle_id' => $vehicle->id,
+                        'registration_number' => $vehicle->registration_number,
+                    ]);
+                    
+                    static::notifyAdminsAboutVehicle($vehicle, 'resubmitted');
+                }
+            }
+        });
+    }
+
+    /**
+     * Notify admins about vehicle (new or resubmitted)
+     */
+    private static function notifyAdminsAboutVehicle($vehicle, $type = 'new')
+    {
+        try {
+            $admins = \App\Models\Admin::all();
+            
+            $isResubmitted = $type === 'resubmitted';
+            $notificationTitle = $isResubmitted 
+                ? 'Vehicle Resubmitted for Verification' 
+                : 'New Vehicle Verification Request';
+            
+            \Log::info('Notifying admins about vehicle', [
+                'vehicle_id' => $vehicle->id,
+                'type' => $type,
+                'admin_count' => $admins->count(),
+            ]);
+
+            foreach ($admins as $admin) {
                     try {
                         \Log::info('Sending notification to admin', [
                             'admin_id' => $admin->id,
                             'admin_email' => $admin->email,
                             'has_fcm_token' => !empty($admin->fcm_token),
                             'vehicle_id' => $vehicle->id,
+                            'type' => $type,
                         ]);
 
                         // Send Filament notification - must use sendToDatabase() + keepAfterClosed() + send()
                         try {
                             $userName = $vehicle->user?->name ?? $vehicle->owner_name ?? 'Unknown User';
+                            $bodyMessage = $isResubmitted
+                                ? "{$userName} has resubmitted a previously rejected vehicle for verification."
+                                : "{$userName} has submitted a new vehicle for verification.";
                             
                             \Filament\Notifications\Notification::make()
-                                ->title('New Vehicle Verification Request')
-                                ->body("{$userName} has submitted a new vehicle for verification.")
+                                ->title($notificationTitle)
+                                ->body($bodyMessage)
                                 ->success()
                                 ->icon('heroicon-o-truck')
                                 // 1. Send to the database record (CRITICAL for CRUD)
@@ -236,14 +279,17 @@ class Vehicle extends Model
                             try {
                                 // Get user name - prefer user relationship, fallback to owner_name
                                 $userName = $vehicle->user?->name ?? $vehicle->owner_name ?? 'Unknown User';
+                                $fcmBody = $isResubmitted
+                                    ? "{$userName} has resubmitted a previously rejected vehicle for verification."
+                                    : "{$userName} has submitted a new vehicle for verification.";
                                 
                                 $fcmService = app(\App\Services\FCMNotificationService::class);
                                 $fcmService->sendToAdmin(
                                     $admin,
-                                    'New Vehicle Verification Request',
-                                    "{$userName} has submitted a new vehicle for verification.",
+                                    $notificationTitle,
+                                    $fcmBody,
                                     [
-                                        'type' => 'vehicle_verification_request',
+                                        'type' => $isResubmitted ? 'vehicle_resubmitted' : 'vehicle_verification_request',
                                         'vehicle_id' => (string) $vehicle->id,
                                         'registration_number' => $vehicle->registration_number,
                                         'user_name' => $userName,
@@ -268,13 +314,14 @@ class Vehicle extends Model
                     }
                 }
             } catch (\Exception $e) {
-                \Log::error('Failed to notify admins about new vehicle', [
+                \Log::error('Failed to notify admins about vehicle', [
                     'vehicle_id' => $vehicle->id,
+                    'type' => $type,
                     'error' => $e->getMessage(),
                     'trace' => $e->getTraceAsString(),
                 ]);
             }
-        });
+        }
     }
 
 }
