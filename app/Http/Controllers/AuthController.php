@@ -152,6 +152,7 @@ class AuthController extends Controller
             'token'     => $token,
             'type'      => $type,
             'unique_id' => $entity->unique_id,
+            'name'      => $entity->name, // Add missing name field
         ]);
     }
 
