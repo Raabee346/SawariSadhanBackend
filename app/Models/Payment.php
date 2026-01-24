@@ -36,7 +36,7 @@ class Payment extends Model
         'service_fee' => 'decimal:2',
         'vat_amount' => 'decimal:2',
         'total_amount' => 'decimal:2',
-        'payment_date' => 'date',
+        'payment_date' => 'datetime',
         'payment_details' => 'array',
     ];
 

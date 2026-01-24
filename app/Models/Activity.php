@@ -82,7 +82,7 @@ class Activity extends Model
             'related_type' => 'App\Models\Payment',
             'title' => 'Payment Successful',
             'message' => 'NPR ' . number_format($payment->total_amount, 2) . ' paid for vehicle tax.',
-            'activity_date' => $payment->payment_date ?? now(),
+            'activity_date' => $payment->payment_date ?? $payment->created_at ?? now(),
             'metadata' => [
                 'amount' => $payment->total_amount,
                 'payment_method' => $payment->payment_method,
@@ -108,7 +108,7 @@ class Activity extends Model
             'related_type' => 'App\Models\RenewalRequest',
             'title' => 'Bluebook Renewal',
             'message' => 'Bluebook renewal completed successfully for ' . $vehicleInfo . '.',
-            'activity_date' => $renewalRequest->completed_at ?? $renewalRequest->delivered_at ?? now(),
+            'activity_date' => $renewalRequest->completed_at ?? $renewalRequest->delivered_at ?? $renewalRequest->updated_at ?? now(),
             'metadata' => [
                 'service_type' => $renewalRequest->service_type,
                 'vehicle_registration' => $vehicleInfo,
