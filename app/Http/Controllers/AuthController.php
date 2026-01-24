@@ -109,9 +109,11 @@ class AuthController extends Controller
         $token = $entity->createToken($type . '-token')->plainTextToken;
 
         return response()->json([
-            'message' => 'Email verified successfully.',
-            'token'   => $token,
-            'type'    => $type,
+            'message'   => 'Email verified successfully.',
+            'token'     => $token,
+            'type'      => $type,
+            'unique_id' => $entity->unique_id,
+            'name'      => $entity->name,
         ]);
     }
 
