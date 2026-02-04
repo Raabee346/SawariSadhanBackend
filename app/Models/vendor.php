@@ -7,6 +7,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use App\Traits\HasBSTimestamps;
+use App\Models\VendorPayout;
 
 class Vendor extends Authenticatable
 {
@@ -67,6 +68,14 @@ class Vendor extends Authenticatable
         $availability = $this->getAvailabilityForDay($today);
 
         return $availability && $availability->isAvailableAt();
+    }
+
+    /**
+     * Payouts made to this vendor (rider).
+     */
+    public function payouts()
+    {
+        return $this->hasMany(VendorPayout::class);
     }
 
 }
