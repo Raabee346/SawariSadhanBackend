@@ -54,8 +54,12 @@ class VendorPayoutController extends Controller
         $monthStart = $now->copy()->startOfMonth();
         $monthEnd = $now->copy()->endOfMonth();
 
+        // Count tasks completed in this AD month using completed_at or delivered_at
         $thisMonthCompleted = (clone $completedQuery)
-            ->whereBetween('completed_at', [$monthStart, $monthEnd])
+            ->where(function ($q) use ($monthStart, $monthEnd) {
+                $q->whereBetween('completed_at', [$monthStart, $monthEnd])
+                  ->orWhereBetween('delivered_at', [$monthStart, $monthEnd]);
+            })
             ->count();
 
         $thisMonthEarned = $thisMonthCompleted * self::PER_REQUEST_EARNING;
