@@ -13,6 +13,7 @@ use App\Http\Controllers\AdminFcmTokenController;
 use App\Http\Controllers\ReminderController;
 use App\Http\Controllers\ActivityController;
 use App\Http\Controllers\BroadcastNotificationController;
+use App\Http\Controllers\VendorPayoutController;
 
 // Authentication Routes
 Route::post('/register', [AuthController::class, 'register']);
@@ -131,6 +132,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/{id}/read', [BroadcastNotificationController::class, 'markAsReadVendor']);
             Route::post('/mark-all-read', [BroadcastNotificationController::class, 'markAllAsReadVendor']);
         });
+
+        // Vendor payout summary & history
+        Route::get('/payout-summary', [VendorPayoutController::class, 'summary']);
+        Route::get('/payouts', [VendorPayoutController::class, 'index']);
     });
 
     
@@ -147,8 +152,9 @@ Route::post('/convert-date-ad-to-bs', [DateConverterController::class, 'convertA
 // Khalti Callback (called by Khalti server, no auth required)
 Route::post('/payments/khalti/callback', [PaymentController::class, 'khaltiCallback']);
 
-// Admin FCM Token Update (protected by admin session)
+// Admin tools (protected by admin session)
 Route::middleware(['web', 'auth:admin'])->group(function () {
+    // Admin FCM Token Update
     Route::post('/admin/fcm-token', [AdminFcmTokenController::class, 'updateFcmToken']);
     
     // Admin Notification Management
@@ -157,5 +163,12 @@ Route::middleware(['web', 'auth:admin'])->group(function () {
         Route::post('/{id}/read', [\App\Http\Controllers\AdminNotificationController::class, 'markAsRead']);
         Route::delete('/{id}', [\App\Http\Controllers\AdminNotificationController::class, 'delete']);
         Route::post('/mark-all-read', [\App\Http\Controllers\AdminNotificationController::class, 'markAllAsRead']);
+    });
+
+    // Admin payout workflow (initiate and mark paid)
+    Route::prefix('admin/vendor-payouts')->group(function () {
+        Route::get('/pending', [VendorPayoutController::class, 'adminPending']);
+        Route::post('/{vendor}/initiate', [VendorPayoutController::class, 'adminInitiate']);
+        Route::post('/{payout}/mark-paid', [VendorPayoutController::class, 'adminMarkPaid']);
     });
 });
