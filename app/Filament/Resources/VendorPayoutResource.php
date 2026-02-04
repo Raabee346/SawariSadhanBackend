@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\VendorPayoutResource\Pages;
+use App\Filament\Resources\Vendors\VendorResource;
 use App\Models\Vendor;
 use App\Models\VendorPayout;
 use App\Models\RenewalRequest;
@@ -37,6 +38,25 @@ class VendorPayoutResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            // Only show vendors whose pending payout > 0
+            ->modifyQueryUsing(function (\Illuminate\Database\Eloquent\Builder $query) {
+                $perRequest = 250.0;
+
+                $query->whereRaw("
+                    (
+                        (SELECT COUNT(*) 
+                         FROM renewal_requests 
+                         WHERE renewal_requests.vendor_id = vendors.id 
+                           AND renewal_requests.status = 'completed') * ?
+                    ) >
+                    (
+                        SELECT COALESCE(SUM(amount), 0) 
+                        FROM vendor_payouts 
+                        WHERE vendor_payouts.vendor_id = vendors.id 
+                          AND vendor_payouts.status = 'paid'
+                    )
+                ", [$perRequest]);
+            })
             ->columns([
                 TextColumn::make('name')
                     ->label('Vendor')
@@ -83,6 +103,8 @@ class VendorPayoutResource extends Resource
                     })
                     ->sortable(),
             ])
+            // Clicking a row opens the full Vendor view with payout relation/history
+            ->recordUrl(fn (Vendor $record) => VendorResource::getUrl('view', ['record' => $record]))
             ->filters([
                 //
             ])
