@@ -43,20 +43,20 @@ class VendorPayoutResource extends Resource
             // Only show vendors whose pending payout > 0
             ->modifyQueryUsing(function (\Illuminate\Database\Eloquent\Builder $query) {
                 $perRequest = 250.0;
-
+                
+                // Filter vendors where (completed_requests * 250) > total_paid
                 $query->whereRaw("
                     (
-                        (SELECT COUNT(*) 
-                         FROM renewal_requests 
-                         WHERE renewal_requests.vendor_id = vendors.id 
-                           AND renewal_requests.status = 'completed') * ?
-                    ) >
-                    (
-                        SELECT COALESCE(SUM(amount), 0) 
+                        SELECT COUNT(*) 
+                        FROM renewal_requests 
+                        WHERE renewal_requests.vendor_id = vendors.id 
+                          AND renewal_requests.status = 'completed'
+                    ) * ? > COALESCE((
+                        SELECT SUM(amount) 
                         FROM vendor_payouts 
                         WHERE vendor_payouts.vendor_id = vendors.id 
                           AND vendor_payouts.status = 'paid'
-                    )
+                    ), 0)
                 ", [$perRequest]);
             })
             ->columns([
@@ -69,8 +69,7 @@ class VendorPayoutResource extends Resource
                         return RenewalRequest::where('vendor_id', $record->id)
                             ->where('status', 'completed')
                             ->count();
-                    })
-                    ->sortable(),
+                    }),
                 TextColumn::make('total_earned')
                     ->label('Total Earned')
                     ->money('NPR')
@@ -79,8 +78,7 @@ class VendorPayoutResource extends Resource
                             ->where('status', 'completed')
                             ->count();
                         return $completed * 250.0;
-                    })
-                    ->sortable(),
+                    }),
                 TextColumn::make('total_paid')
                     ->label('Total Paid')
                     ->money('NPR')
@@ -88,8 +86,7 @@ class VendorPayoutResource extends Resource
                         return (float) VendorPayout::where('vendor_id', $record->id)
                             ->where('status', 'paid')
                             ->sum('amount');
-                    })
-                    ->sortable(),
+                    }),
                 TextColumn::make('payout_pending')
                     ->label('Pending Payout')
                     ->money('NPR')
@@ -102,8 +99,7 @@ class VendorPayoutResource extends Resource
                             ->where('status', 'paid')
                             ->sum('amount');
                         return max(0, $totalEarned - $totalPaid);
-                    })
-                    ->sortable(),
+                    }),
             ])
             ->actions([
                 Action::make('payWithKhalti')
@@ -238,11 +234,15 @@ class VendorPayoutResource extends Resource
                     }),
             ])
             // Clicking a row opens the full Vendor view with payout relation/history
-            ->recordUrl(fn (Vendor $record) => VendorResource::getUrl('view', ['record' => $record]))
+            ->recordUrl(function (Vendor $record) {
+                return VendorResource::getUrl('view', ['record' => $record]);
+            })
             ->filters([
                 //
             ])
-            ->defaultSort('name');
+            ->defaultSort('name')
+            ->emptyStateHeading('No vendors with pending payouts')
+            ->emptyStateDescription('Vendors with pending payouts will appear here.');
     }
 
     public static function getPages(): array
