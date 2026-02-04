@@ -6,7 +6,6 @@ use App\Filament\Resources\Vendors\Pages\CreateVendor;
 use App\Filament\Resources\Vendors\Pages\EditVendor;
 use App\Filament\Resources\Vendors\Pages\ListVendors;
 use App\Filament\Resources\Vendors\Pages\ViewVendor;
-use App\Filament\Resources\Vendors\RelationManagers\PayoutsRelationManager;
 use App\Filament\Resources\Vendors\Schemas\VendorForm;
 use App\Filament\Resources\Vendors\Tables\VendorsTable;
 use App\Models\Vendor;
@@ -35,7 +34,7 @@ class VendorResource extends Resource
     public static function getRelations(): array
     {
         return [
-            PayoutsRelationManager::class,
+            //
         ];
     }
 
