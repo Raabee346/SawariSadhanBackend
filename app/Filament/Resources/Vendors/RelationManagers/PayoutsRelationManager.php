@@ -17,6 +17,10 @@ class PayoutsRelationManager extends RelationManager
 {
     protected static string $relationship = 'payouts';
 
+    protected static ?string $title = 'Payouts';
+
+    protected static ?string $recordTitleAttribute = 'id';
+
     public function table(Table $table): Table
     {
         return $table
@@ -53,64 +57,119 @@ class PayoutsRelationManager extends RelationManager
                     ->icon('heroicon-o-banknotes')
                     ->requiresConfirmation()
                     ->action(function () {
-                        /** @var \App\Models\Vendor $vendor */
-                        $vendor = $this->getOwnerRecord();
+                        try {
+                            /** @var \App\Models\Vendor $vendor */
+                            $vendor = $this->getOwnerRecord();
 
-                        // Compute pending amount: completed * 250 - already paid
-                        $completedCount = RenewalRequest::where('vendor_id', $vendor->id)
-                            ->where('status', 'completed')
-                            ->count();
+                            if (!$vendor) {
+                                \Filament\Notifications\Notification::make()
+                                    ->title('Error')
+                                    ->body('Vendor record not found.')
+                                    ->danger()
+                                    ->send();
+                                return;
+                            }
 
-                        $perRequest = 250.0;
-                        $totalEarned = $completedCount * $perRequest;
+                            // Compute pending amount: completed * 250 - already paid
+                            $completedCount = RenewalRequest::where('vendor_id', $vendor->id)
+                                ->where('status', 'completed')
+                                ->count();
 
-                        $totalPaid = VendorPayout::where('vendor_id', $vendor->id)
-                            ->where('status', 'paid')
-                            ->sum('amount');
+                            $perRequest = 250.0;
+                            $totalEarned = $completedCount * $perRequest;
 
-                        $pending = max(0, $totalEarned - $totalPaid);
+                            $totalPaid = VendorPayout::where('vendor_id', $vendor->id)
+                                ->where('status', 'paid')
+                                ->sum('amount');
 
-                        if ($pending <= 0) {
-                            $this->notify('warning', 'No pending payout for this vendor.');
-                            return;
+                            $pending = max(0, $totalEarned - $totalPaid);
+
+                            if ($pending <= 0) {
+                                \Filament\Notifications\Notification::make()
+                                    ->title('No pending payout')
+                                    ->body('This vendor has no pending payout amount.')
+                                    ->warning()
+                                    ->send();
+                                return;
+                            }
+
+                            $now = now();
+
+                            // Initialize Khalti payment in sandbox
+                            /** @var KhaltiPaymentService $khalti */
+                            $khalti = app(KhaltiPaymentService::class);
+
+                            $transactionId = 'VENDOR_PAYOUT_' . $vendor->id . '_' . $now->timestamp;
+                            $productName = 'Vendor Payout - ' . $vendor->name;
+
+                            $result = $khalti->initiatePayment(
+                                $pending,
+                                $transactionId,
+                                $productName,
+                                []
+                            );
+
+                            if (!($result['success'] ?? false) || empty($result['payment_url'])) {
+                                \Filament\Notifications\Notification::make()
+                                    ->title('Payment initiation failed')
+                                    ->body($result['message'] ?? 'Failed to initialize Khalti payout.')
+                                    ->danger()
+                                    ->send();
+                                return;
+                            }
+
+                            try {
+                                // Create payout record in processing state with Khalti pidx
+                                VendorPayout::create([
+                                    'vendor_id' => $vendor->id,
+                                    'amount' => $pending,
+                                    'status' => 'processing',
+                                    'month' => (int) $now->format('n'),
+                                    'year' => (int) $now->format('Y'),
+                                    'currency' => 'NPR',
+                                    'khalti_pidx' => $result['pidx'] ?? null,
+                                    'khalti_payload' => $result['data'] ?? null,
+                                    'notes' => 'Payout initialized from Filament vendor detail page with Khalti sandbox.',
+                                ]);
+
+                                // Show success notification with link to open Khalti payment
+                                \Filament\Notifications\Notification::make()
+                                    ->title('Payment initiated successfully')
+                                    ->body('Click the button below to complete the payment with Khalti.')
+                                    ->success()
+                                    ->actions([
+                                        \Filament\Notifications\Actions\Action::make('openKhalti')
+                                            ->label('Open Khalti Payment')
+                                            ->url($result['payment_url'])
+                                            ->openUrlInNewTab()
+                                            ->button()
+                                            ->color('primary'),
+                                    ])
+                                    ->send();
+                            } catch (\Exception $e) {
+                                \Filament\Notifications\Notification::make()
+                                    ->title('Error creating payout record')
+                                    ->body('Payment URL generated but failed to save payout record: ' . $e->getMessage())
+                                    ->danger()
+                                    ->send();
+                                \Illuminate\Support\Facades\Log::error('Failed to create VendorPayout', [
+                                    'vendor_id' => $vendor->id,
+                                    'error' => $e->getMessage(),
+                                    'trace' => $e->getTraceAsString(),
+                                ]);
+                            }
+                        } catch (\Exception $e) {
+                            \Filament\Notifications\Notification::make()
+                                ->title('Unexpected error')
+                                ->body('An error occurred: ' . $e->getMessage())
+                                ->danger()
+                                ->send();
+                            \Illuminate\Support\Facades\Log::error('Payout initiation error', [
+                                'vendor_id' => $vendor->id ?? null,
+                                'error' => $e->getMessage(),
+                                'trace' => $e->getTraceAsString(),
+                            ]);
                         }
-
-                        $now = now();
-
-                        // Initialize Khalti payment in sandbox
-                        /** @var KhaltiPaymentService $khalti */
-                        $khalti = app(KhaltiPaymentService::class);
-
-                        $transactionId = 'VENDOR_PAYOUT_' . $vendor->id . '_' . $now->timestamp;
-                        $productName = 'Vendor Payout - ' . $vendor->name;
-
-                        $result = $khalti->initiatePayment(
-                            $pending,
-                            $transactionId,
-                            $productName,
-                            []
-                        );
-
-                        if (!($result['success'] ?? false) || empty($result['payment_url'])) {
-                            $this->notify('danger', $result['message'] ?? 'Failed to initialize Khalti payout.');
-                            return;
-                        }
-
-                        // Create payout record in processing state with Khalti pidx
-                        VendorPayout::create([
-                            'vendor_id' => $vendor->id,
-                            'amount' => $pending,
-                            'status' => 'processing',
-                            'month' => (int) $now->format('n'),
-                            'year' => (int) $now->format('Y'),
-                            'currency' => 'NPR',
-                            'khalti_pidx' => $result['pidx'] ?? null,
-                            'khalti_payload' => $result['data'] ?? null,
-                            'notes' => 'Payout initialized from Filament with Khalti sandbox.',
-                        ]);
-
-                        // Open Khalti sandbox checkout in a new tab
-                        $this->redirect($result['payment_url'], navigate: false);
                     }),
             ])
             ->actions([
