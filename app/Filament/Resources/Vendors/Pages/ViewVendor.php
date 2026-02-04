@@ -415,47 +415,47 @@ class ViewVendor extends ViewRecord
                     ->content('')
                     ->columnSpanFull(),
                 
-                Placeholder::make('paid_statements')
-                    ->label('Paid Statements')
-                    ->content(function ($record) {
-                        $paidPayouts = \App\Models\VendorPayout::where('vendor_id', $record->id)
-                            ->where('status', 'paid')
-                            ->orderByDesc('paid_at')
-                            ->get();
+                // Placeholder::make('paid_statements')
+                //     ->label('Paid Statements')
+                //     ->content(function ($record) {
+                //         $paidPayouts = \App\Models\VendorPayout::where('vendor_id', $record->id)
+                //             ->where('status', 'paid')
+                //             ->orderByDesc('paid_at')
+                //             ->get();
                         
-                        // if ($paidPayouts->isEmpty()) {
-                        //     return new \Illuminate\Support\HtmlString(
-                        //         '<div style="padding: 15px; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; text-align: center; color: #6b7280;">No paid statements yet.</div>'
-                        //     );
-                        // }
+                //         // if ($paidPayouts->isEmpty()) {
+                //         //     return new \Illuminate\Support\HtmlString(
+                //         //         '<div style="padding: 15px; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; text-align: center; color: #6b7280;">No paid statements yet.</div>'
+                //         //     );
+                //         // }
                         
-                        $html = '<div style="background: white; border-radius: 8px; border: 1px solid #e5e7eb; overflow: hidden;">';
-                        $html .= '<table style="width: 100%; border-collapse: collapse;">';
-                        $html .= '<thead><tr style="background: #f3f4f6;">';
-                        $html .= '<th style="padding: 12px; border-bottom: 2px solid #e5e7eb; text-align: left; font-weight: 600;">Date</th>';
-                        $html .= '<th style="padding: 12px; border-bottom: 2px solid #e5e7eb; text-align: right; font-weight: 600;">Amount</th>';
-                        $html .= '<th style="padding: 12px; border-bottom: 2px solid #e5e7eb; text-align: left; font-weight: 600;">Period</th>';
-                        $html .= '<th style="padding: 12px; border-bottom: 2px solid #e5e7eb; text-align: left; font-weight: 600;">Notes</th>';
-                        $html .= '</tr></thead><tbody>';
+                //         $html = '<div style="background: white; border-radius: 8px; border: 1px solid #e5e7eb; overflow: hidden;">';
+                //         $html .= '<table style="width: 100%; border-collapse: collapse;">';
+                //         $html .= '<thead><tr style="background: #f3f4f6;">';
+                //         $html .= '<th style="padding: 12px; border-bottom: 2px solid #e5e7eb; text-align: left; font-weight: 600;">Date</th>';
+                //         $html .= '<th style="padding: 12px; border-bottom: 2px solid #e5e7eb; text-align: right; font-weight: 600;">Amount</th>';
+                //         $html .= '<th style="padding: 12px; border-bottom: 2px solid #e5e7eb; text-align: left; font-weight: 600;">Period</th>';
+                //         $html .= '<th style="padding: 12px; border-bottom: 2px solid #e5e7eb; text-align: left; font-weight: 600;">Notes</th>';
+                //         $html .= '</tr></thead><tbody>';
                         
-                        foreach ($paidPayouts as $payout) {
-                            $paidDate = $payout->paid_at ? $payout->paid_at->format('Y-m-d') : 'N/A';
-                            $monthName = $payout->month ? date('F', mktime(0, 0, 0, $payout->month, 1)) : '—';
-                            $period = $monthName . ' ' . $payout->year;
-                            $notes = $payout->notes ? substr($payout->notes, 0, 50) . (strlen($payout->notes) > 50 ? '...' : '') : '—';
+                //         foreach ($paidPayouts as $payout) {
+                //             $paidDate = $payout->paid_at ? $payout->paid_at->format('Y-m-d') : 'N/A';
+                //             $monthName = $payout->month ? date('F', mktime(0, 0, 0, $payout->month, 1)) : '—';
+                //             $period = $monthName . ' ' . $payout->year;
+                //             $notes = $payout->notes ? substr($payout->notes, 0, 50) . (strlen($payout->notes) > 50 ? '...' : '') : '—';
                             
-                            $html .= '<tr style="border-bottom: 1px solid #e5e7eb;">';
-                            $html .= '<td style="padding: 12px; color: #059669; font-weight: 500;">' . htmlspecialchars($paidDate) . '</td>';
-                            $html .= '<td style="padding: 12px; text-align: right; font-weight: 600; color: #059669;">NPR ' . number_format((float) $payout->amount, 2) . '</td>';
-                            $html .= '<td style="padding: 12px; color: #6b7280;">' . htmlspecialchars($period) . '</td>';
-                            $html .= '<td style="padding: 12px; color: #6b7280; font-size: 13px;">' . htmlspecialchars($notes) . '</td>';
-                            $html .= '</tr>';
-                        }
+                //             $html .= '<tr style="border-bottom: 1px solid #e5e7eb;">';
+                //             $html .= '<td style="padding: 12px; color: #059669; font-weight: 500;">' . htmlspecialchars($paidDate) . '</td>';
+                //             $html .= '<td style="padding: 12px; text-align: right; font-weight: 600; color: #059669;">NPR ' . number_format((float) $payout->amount, 2) . '</td>';
+                //             $html .= '<td style="padding: 12px; color: #6b7280;">' . htmlspecialchars($period) . '</td>';
+                //             $html .= '<td style="padding: 12px; color: #6b7280; font-size: 13px;">' . htmlspecialchars($notes) . '</td>';
+                //             $html .= '</tr>';
+                //         }
                         
-                        $html .= '</tbody></table></div>';
-                        return new \Illuminate\Support\HtmlString($html);
-                    })
-                    ->columnSpanFull(),
+                //         $html .= '</tbody></table></div>';
+                //         return new \Illuminate\Support\HtmlString($html);
+                //     })
+                //     ->columnSpanFull(),
             ]);
     }
 }
