@@ -112,7 +112,7 @@ class VendorPayoutResource extends Resource
                     ->color('success')
                     ->requiresConfirmation()
                     ->modalHeading('Initiate Payout with Khalti')
-                    ->modalDescription(fn (Vendor $record): string => {
+                    ->modalDescription(function (Vendor $record): string {
                         $completed = RenewalRequest::where('vendor_id', $record->id)
                             ->where('status', 'completed')
                             ->count();
