@@ -6,6 +6,7 @@ use App\Models\RenewalRequest;
 use App\Models\Vendor;
 use App\Models\VendorPayout;
 use App\Services\KhaltiPaymentService;
+use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
@@ -18,7 +19,7 @@ class PayoutsRelationManager extends RelationManager
 
     protected static ?string $title = 'Payouts';
 
-    protected static string|Heroicon|null $icon = Heroicon::OutlinedBanknotes;
+    protected static string|BackedEnum|null $icon = Heroicon::OutlinedBanknotes;
 
     private const PER_REQUEST_EARNING = 250.0;
 
