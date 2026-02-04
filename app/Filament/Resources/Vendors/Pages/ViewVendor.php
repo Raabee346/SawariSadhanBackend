@@ -423,11 +423,11 @@ class ViewVendor extends ViewRecord
                             ->orderByDesc('paid_at')
                             ->get();
                         
-                        if ($paidPayouts->isEmpty()) {
-                            return new \Illuminate\Support\HtmlString(
-                                '<div style="padding: 15px; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; text-align: center; color: #6b7280;">No paid statements yet.</div>'
-                            );
-                        }
+                        // if ($paidPayouts->isEmpty()) {
+                        //     return new \Illuminate\Support\HtmlString(
+                        //         '<div style="padding: 15px; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; text-align: center; color: #6b7280;">No paid statements yet.</div>'
+                        //     );
+                        // }
                         
                         $html = '<div style="background: white; border-radius: 8px; border: 1px solid #e5e7eb; overflow: hidden;">';
                         $html .= '<table style="width: 100%; border-collapse: collapse;">';
