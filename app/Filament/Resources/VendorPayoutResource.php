@@ -7,7 +7,6 @@ use App\Filament\Resources\Vendors\VendorResource;
 use App\Models\RenewalRequest;
 use App\Models\Vendor;
 use App\Models\VendorPayout;
-use App\Services\KhaltiPaymentService;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Resources\Resource;
@@ -99,18 +98,18 @@ class VendorPayoutResource extends Resource
                     }),
             ])
             ->recordActions([
-                Action::make('payWithKhalti')
-                    ->label('Pay with Khalti')
+                Action::make('createPayout')
+                    ->label('Create Payout')
                     ->icon('heroicon-o-banknotes')
                     ->color('success')
                     ->requiresConfirmation()
-                    ->modalHeading('Initiate Payout with Khalti')
+                    ->modalHeading('Create Vendor Payout')
                     ->modalDescription(function (Vendor $record): string {
                         $c = RenewalRequest::where('vendor_id', $record->id)->where('status', 'completed')->count();
                         $earned = $c * 250.0;
                         $paid = (float) VendorPayout::where('vendor_id', $record->id)->where('status', 'paid')->sum('amount');
                         $pending = max(0, $earned - $paid);
-                        return 'Initiate payment of NPR ' . number_format($pending, 2) . ' to ' . $record->name . '?';
+                        return 'Create a payout record of NPR ' . number_format($pending, 2) . ' for ' . $record->name . '? This will create a pending payout record. Process the payment externally (bank transfer, Khalti transfer, cash, etc.) and then mark it as paid.';
                     })
                     ->action(function (Vendor $record) {
                         $completedCount = RenewalRequest::where('vendor_id', $record->id)->where('status', 'completed')->count();
@@ -126,46 +125,21 @@ class VendorPayoutResource extends Resource
                             return;
                         }
 
-                        $khalti = app(KhaltiPaymentService::class);
                         $now = now();
-                        $transactionId = 'VENDOR_PAYOUT_' . $record->id . '_' . $now->timestamp;
-                        $productName = 'Vendor Payout - ' . $record->name;
-
-                        $result = $khalti->initiatePayment($pending, $transactionId, $productName, []);
-
-                        if (!($result['success'] ?? false) || empty($result['payment_url'])) {
-                            \Filament\Notifications\Notification::make()
-                                ->title('Payment initiation failed')
-                                ->body($result['message'] ?? 'Failed to initialize Khalti payout.')
-                                ->danger()
-                                ->send();
-                            return;
-                        }
-
                         VendorPayout::create([
                             'vendor_id' => $record->id,
                             'amount' => $pending,
-                            'status' => 'processing',
+                            'status' => 'pending',
                             'month' => (int) $now->format('n'),
                             'year' => (int) $now->format('Y'),
                             'currency' => 'NPR',
-                            'khalti_pidx' => $result['pidx'] ?? null,
-                            'khalti_payload' => $result['data'] ?? null,
-                            'notes' => 'Payout from admin Vendor Payouts list (Khalti sandbox).',
+                            'notes' => 'Payout created by admin from Vendor Payouts list. Process payment externally (bank transfer, Khalti transfer, cash, etc.) and mark as paid when completed.',
                         ]);
 
                         \Filament\Notifications\Notification::make()
-                            ->title('Payment initiated')
-                            ->body('Click the button to open Khalti payment page.')
+                            ->title('Payout created')
+                            ->body('Payout record created with status "pending". Process the payment externally and use "Mark as Paid" action when done.')
                             ->success()
-                            ->actions([
-                                \Filament\Notifications\Actions\Action::make('openKhalti')
-                                    ->label('Open Khalti Payment')
-                                    ->url($result['payment_url'])
-                                    ->openUrlInNewTab()
-                                    ->button()
-                                    ->color('primary'),
-                            ])
                             ->send();
                     }),
             ])

@@ -140,7 +140,7 @@ class KhaltiPaymentService
 
             $errorMessage = $responseData['detail'] ?? ($responseData['message'] ?? 'Failed to initiate payment');
             
-            // Provide helpful error message for 401 errors
+            // Provide helpful error message for specific status codes
             if ($response->status() === 401) {
                 $errorMessage = 'Invalid Khalti secret key. Please verify your KHALTI_SECRET_KEY in .env file. For test mode, get keys from https://test-admin.khalti.com';
                 Log::error('Khalti payment initiation failed - Invalid token (401)', [
@@ -151,6 +151,14 @@ class KhaltiPaymentService
                     'secret_key_configured' => !empty($this->secretKey) && $this->secretKey !== 'test_secret_key_xxxxxxxxxxxxxxxxx',
                     'secret_key_length' => strlen($this->secretKey ?? ''),
                     'hint' => 'Make sure KHALTI_SECRET_KEY is set in .env file with a valid test secret key from https://test-admin.khalti.com',
+                ]);
+            } elseif ($response->status() === 503) {
+                $errorMessage = 'Khalti service is temporarily unavailable (503). Please try again later or create a manual payout record.';
+                Log::error('Khalti payment initiation failed - Service Unavailable (503)', [
+                    'status_code' => $response->status(),
+                    'error' => $errorMessage,
+                    'response' => $responseData,
+                    'base_url' => $this->baseUrl,
                 ]);
             } else {
                 Log::error('Khalti payment initiation failed', [
