@@ -105,7 +105,22 @@ class PayoutsRelationManager extends RelationManager
 
                         $this->resetTable();
                     })
-                    ->visible(fn (): bool => $this->getPendingPayoutAmount($this->getOwnerRecord()) > 0),
+                    ->visible(function (): bool {
+                        $vendor = $this->getOwnerRecord();
+                        $pending = $this->getPendingPayoutAmount($vendor);
+                        
+                        // Hide if no pending amount OR if there's already a pending/processing payout
+                        if ($pending <= 0) {
+                            return false;
+                        }
+                        
+                        // Check if there's already a pending or processing payout
+                        $hasPendingPayout = VendorPayout::where('vendor_id', $vendor->id)
+                            ->whereIn('status', ['pending', 'processing'])
+                            ->exists();
+                        
+                        return !$hasPendingPayout;
+                    }),
             ])
             ->recordActions([
                 Action::make('markPaid')
