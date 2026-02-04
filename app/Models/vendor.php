@@ -78,4 +78,12 @@ class Vendor extends Authenticatable
         return $this->hasMany(VendorPayout::class);
     }
 
+    /**
+     * Backwards‑compat helper in case any code calls payout() singular.
+     */
+    public function payout()
+    {
+        return $this->payouts();
+    }
+
 }
