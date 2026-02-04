@@ -6,6 +6,7 @@ use App\Models\RenewalRequest;
 use App\Models\Vendor;
 use App\Models\VendorPayout;
 use BackedEnum;
+use App\Services\FCMNotificationService;
 use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
@@ -142,6 +143,31 @@ class PayoutsRelationManager extends RelationManager
                         $record->status = 'paid';
                         $record->paid_at = now();
                         $record->save();
+
+                        // Send FCM notification to the respective vendor about payout
+                        try {
+                            /** @var Vendor $vendor */
+                            $vendor = $record->vendor()->first();
+                            if ($vendor) {
+                                $fcmService = app(FCMNotificationService::class);
+                                $title = 'Payout Sent';
+                                $body = 'Your payout of NPR ' . number_format((float) $record->amount, 2) . ' has been sent on ' . $record->paid_at->format('Y-m-d H:i') . '.';
+
+                                $fcmService->sendToVendor($vendor, $title, $body, [
+                                    'type' => 'vendor_payout_paid',
+                                    'payout_id' => (string) $record->id,
+                                    'amount' => (string) $record->amount,
+                                    'paid_at' => $record->paid_at->toIso8601String(),
+                                ]);
+                            }
+                        } catch (\Throwable $e) {
+                            \Log::error('Failed to send FCM notification for vendor payout', [
+                                'payout_id' => $record->id,
+                                'vendor_id' => $record->vendor_id,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
+
                         \Filament\Notifications\Notification::make()
                             ->title('Payout marked as paid')
                             ->body('Payout of NPR ' . number_format((float) $record->amount, 2) . ' has been marked as paid.')
