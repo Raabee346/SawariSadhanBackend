@@ -106,10 +106,12 @@ class KhaltiPaymentService
                 'auth_header_prefix' => substr($authHeader, 0, 15) . '...',
             ]);
 
-            $response = Http::withHeaders([
-                'Authorization' => $authHeader,
-                'Content-Type' => 'application/json',
-            ])->post($this->baseUrl . '/epayment/initiate/', $payload);
+            $response = Http::timeout(60) // Increase timeout to 60 seconds
+                ->retry(2, 1000) // Retry up to 2 times with 1 second delay
+                ->withHeaders([
+                    'Authorization' => $authHeader,
+                    'Content-Type' => 'application/json',
+                ])->post($this->baseUrl . '/epayment/initiate/', $payload);
 
             $responseData = $response->json();
             
@@ -163,8 +165,22 @@ class KhaltiPaymentService
                 'message' => $errorMessage,
                 'error' => $responseData,
             ];
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            // Handle timeout and connection errors specifically
+            Log::error('Khalti payment initiation failed - Connection/Timeout error', [
+                'message' => $e->getMessage(),
+                'url' => $this->baseUrl . '/epayment/initiate/',
+            ]);
+            return [
+                'success' => false,
+                'message' => 'Connection timeout. Please check your internet connection and try again. If the problem persists, Khalti services may be temporarily unavailable.',
+            ];
         } catch (\Exception $e) {
-            Log::error('Khalti payment initiation failed: ' . $e->getMessage());
+            Log::error('Khalti payment initiation failed', [
+                'message' => $e->getMessage(),
+                'exception' => get_class($e),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return [
                 'success' => false,
                 'message' => 'Payment initiation failed: ' . $e->getMessage(),
@@ -181,12 +197,14 @@ class KhaltiPaymentService
     public function verifyPayment(string $pidx)
     {
         try {
-            $response = Http::withHeaders([
-                'Authorization' => 'Key ' . $this->secretKey,
-                'Content-Type' => 'application/json',
-            ])->post($this->baseUrl . '/epayment/lookup/', [
-                'pidx' => $pidx,
-            ]);
+            $response = Http::timeout(60) // Increase timeout to 60 seconds
+                ->retry(2, 1000) // Retry up to 2 times with 1 second delay
+                ->withHeaders([
+                    'Authorization' => 'Key ' . $this->secretKey,
+                    'Content-Type' => 'application/json',
+                ])->post($this->baseUrl . '/epayment/lookup/', [
+                    'pidx' => $pidx,
+                ]);
 
             $responseData = $response->json();
 
@@ -206,8 +224,22 @@ class KhaltiPaymentService
                 'message' => $responseData['detail'] ?? 'Payment verification failed',
                 'data' => $responseData,
             ];
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            // Handle timeout and connection errors specifically
+            Log::error('Khalti payment verification failed - Connection/Timeout error', [
+                'message' => $e->getMessage(),
+                'pidx' => $pidx,
+            ]);
+            return [
+                'success' => false,
+                'message' => 'Connection timeout while verifying payment. Please try again later.',
+            ];
         } catch (\Exception $e) {
-            Log::error('Khalti payment verification failed: ' . $e->getMessage());
+            Log::error('Khalti payment verification failed', [
+                'message' => $e->getMessage(),
+                'exception' => get_class($e),
+                'pidx' => $pidx,
+            ]);
             return [
                 'success' => false,
                 'message' => 'Payment verification failed: ' . $e->getMessage(),
