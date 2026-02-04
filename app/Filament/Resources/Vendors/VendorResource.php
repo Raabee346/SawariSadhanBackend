@@ -34,7 +34,7 @@ class VendorResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            RelationManagers\PayoutsRelationManager::class,
         ];
     }
 
