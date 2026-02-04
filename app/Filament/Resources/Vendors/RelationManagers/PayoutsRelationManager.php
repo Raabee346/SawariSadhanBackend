@@ -9,6 +9,7 @@ use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Filament\Support\Icons\Heroicon;
 
@@ -106,7 +107,7 @@ class PayoutsRelationManager extends RelationManager
                     })
                     ->visible(fn (): bool => $this->getPendingPayoutAmount($this->getOwnerRecord()) > 0),
             ])
-            ->actions([
+            ->recordActions([
                 Action::make('markPaid')
                     ->label('Mark as Paid')
                     ->icon('heroicon-o-check-circle')
@@ -133,7 +134,16 @@ class PayoutsRelationManager extends RelationManager
                             ->send();
                         $this->resetTable();
                     })
-                    ->visible(fn (VendorPayout $record): bool => in_array($record->status, ['pending', 'processing'])),
+                    ->visible(fn (VendorPayout $record): bool => $record->status !== 'paid'),
+            ])
+            ->filters([
+                SelectFilter::make('status')
+                    ->options([
+                        'pending' => 'Pending',
+                        'processing' => 'Processing',
+                        'paid' => 'Paid',
+                    ])
+                    ->label('Filter by Status'),
             ])
             ->defaultSort('created_at', 'desc')
             ->emptyStateHeading('No payouts yet')
