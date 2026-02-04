@@ -27,32 +27,39 @@ class PayoutsRelationManager extends RelationManager
         return $table
             ->columns([
                 TextColumn::make('amount')
+                    ->label('Amount')
                     ->money('NPR')
-                    ->sortable(),
+                    ->sortable()
+                    ->weight('bold'),
                 TextColumn::make('status')
+                    ->label('Status')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
                         'paid' => 'success',
                         'processing' => 'warning',
+                        'pending' => 'gray',
                         default => 'gray',
                     }),
+                TextColumn::make('paid_at')
+                    ->label('Paid Date')
+                    ->date('Y-m-d')
+                    ->sortable()
+                    ->placeholder('Not paid yet')
+                    ->color(fn ($state): string => $state ? 'success' : 'gray'),
+                TextColumn::make('created_at')
+                    ->label('Created Date')
+                    ->date('Y-m-d')
+                    ->sortable(),
                 TextColumn::make('month')
                     ->label('Month')
-                    ->formatStateUsing(fn (int $state): string => date('F', mktime(0, 0, 0, $state, 1))),
+                    ->formatStateUsing(fn (?int $state): string => $state ? date('F', mktime(0, 0, 0, $state, 1)) : '—'),
                 TextColumn::make('year')
                     ->label('Year'),
-                TextColumn::make('currency'),
-                TextColumn::make('paid_at')
-                    ->label('Paid At')
-                    ->dateTime()
-                    ->placeholder('—'),
                 TextColumn::make('notes')
-                    ->limit(40)
+                    ->label('Notes')
+                    ->limit(50)
+                    ->wrap()
                     ->placeholder('—'),
-                TextColumn::make('created_at')
-                    ->label('Created')
-                    ->dateTime()
-                    ->sortable(),
             ])
             ->headerActions([
                 Action::make('createPayout')
@@ -99,18 +106,19 @@ class PayoutsRelationManager extends RelationManager
                     })
                     ->visible(fn (): bool => $this->getPendingPayoutAmount($this->getOwnerRecord()) > 0),
             ])
-            ->recordActions([
+            ->actions([
                 Action::make('markPaid')
                     ->label('Mark as Paid')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
                     ->requiresConfirmation()
                     ->modalHeading('Mark payout as paid')
-                    ->modalDescription(fn (VendorPayout $record): string => 'Mark payout of NPR ' . number_format((float) $record->amount, 2) . ' as paid?')
+                    ->modalDescription(fn (VendorPayout $record): string => 'Mark payout of NPR ' . number_format((float) $record->amount, 2) . ' as paid? This will update the status to "paid" and set the paid date.')
                     ->action(function (VendorPayout $record): void {
                         if ($record->status === 'paid') {
                             \Filament\Notifications\Notification::make()
                                 ->title('Already paid')
+                                ->body('This payout is already marked as paid on ' . ($record->paid_at ? $record->paid_at->format('Y-m-d H:i') : 'N/A'))
                                 ->warning()
                                 ->send();
                             return;
@@ -120,11 +128,12 @@ class PayoutsRelationManager extends RelationManager
                         $record->save();
                         \Filament\Notifications\Notification::make()
                             ->title('Payout marked as paid')
+                            ->body('Payout of NPR ' . number_format((float) $record->amount, 2) . ' has been marked as paid.')
                             ->success()
                             ->send();
                         $this->resetTable();
                     })
-                    ->visible(fn (VendorPayout $record): bool => $record->status !== 'paid'),
+                    ->visible(fn (VendorPayout $record): bool => in_array($record->status, ['pending', 'processing'])),
             ])
             ->defaultSort('created_at', 'desc')
             ->emptyStateHeading('No payouts yet')
