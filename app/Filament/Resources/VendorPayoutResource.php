@@ -3,7 +3,9 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\VendorPayoutResource\Pages;
+use App\Models\Vendor;
 use App\Models\VendorPayout;
+use App\Models\RenewalRequest;
 use BackedEnum;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -16,7 +18,8 @@ use UnitEnum;
 
 class VendorPayoutResource extends Resource
 {
-    protected static ?string $model = VendorPayout::class;
+    // Use Vendor as the base model so we can show one row per vendor
+    protected static ?string $model = Vendor::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBanknotes;
 
@@ -26,73 +29,64 @@ class VendorPayoutResource extends Resource
 
     public static function form(Schema $schema): Schema
     {
-        return $schema->components([
-            Select::make('vendor_id')
-                ->relationship('vendor', 'name')
-                ->required()
-                ->searchable()
-                ->preload(),
-            TextInput::make('amount')
-                ->numeric()
-                ->prefix('NPR')
-                ->step(0.01)
-                ->required(),
-            Select::make('status')
-                ->options([
-                    'pending' => 'Pending',
-                    'processing' => 'Processing',
-                    'paid' => 'Paid',
-                    'failed' => 'Failed',
-                ])
-                ->required(),
-            TextInput::make('month')
-                ->numeric()
-                ->minValue(1)
-                ->maxValue(12)
-                ->required(),
-            TextInput::make('year')
-                ->numeric()
-                ->minValue(2000)
-                ->required(),
-            TextInput::make('currency')
-                ->maxLength(3)
-                ->default('NPR'),
-        ]);
+        // This resource is read-only summary in the navigation,
+        // so we don't expose a form here.
+        return $schema;
     }
 
     public static function table(Table $table): Table
     {
         return $table
             ->columns([
-                TextColumn::make('vendor.name')
+                TextColumn::make('name')
                     ->label('Vendor')
                     ->searchable(),
-                TextColumn::make('amount')
+                TextColumn::make('completed_requests')
+                    ->label('Completed Tasks')
+                    ->state(function (Vendor $record): int {
+                        return RenewalRequest::where('vendor_id', $record->id)
+                            ->where('status', 'completed')
+                            ->count();
+                    })
+                    ->sortable(),
+                TextColumn::make('total_earned')
+                    ->label('Total Earned')
                     ->money('NPR')
+                    ->state(function (Vendor $record): float {
+                        $completed = RenewalRequest::where('vendor_id', $record->id)
+                            ->where('status', 'completed')
+                            ->count();
+                        return $completed * 250.0;
+                    })
                     ->sortable(),
-                TextColumn::make('status')
-                    ->badge()
-                    ->color(fn (string $state): string => match ($state) {
-                        'paid' => 'success',
-                        'pending' => 'warning',
-                        'processing' => 'info',
-                        'failed' => 'danger',
-                        default => 'gray',
-                    }),
-                TextColumn::make('month')
-                    ->label('Month'),
-                TextColumn::make('year')
-                    ->label('Year'),
-                TextColumn::make('paid_at')
-                    ->dateTime()
-                    ->label('Paid At')
+                TextColumn::make('total_paid')
+                    ->label('Total Paid')
+                    ->money('NPR')
+                    ->state(function (Vendor $record): float {
+                        return (float) VendorPayout::where('vendor_id', $record->id)
+                            ->where('status', 'paid')
+                            ->sum('amount');
+                    })
                     ->sortable(),
-                TextColumn::make('created_at')
-                    ->dateTime()
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('payout_pending')
+                    ->label('Pending Payout')
+                    ->money('NPR')
+                    ->state(function (Vendor $record): float {
+                        $completed = RenewalRequest::where('vendor_id', $record->id)
+                            ->where('status', 'completed')
+                            ->count();
+                        $totalEarned = $completed * 250.0;
+                        $totalPaid = (float) VendorPayout::where('vendor_id', $record->id)
+                            ->where('status', 'paid')
+                            ->sum('amount');
+                        return max(0, $totalEarned - $totalPaid);
+                    })
+                    ->sortable(),
             ])
-            ->defaultSort('created_at', 'desc');
+            ->filters([
+                //
+            ])
+            ->defaultSort('name');
     }
 
     public static function getPages(): array
