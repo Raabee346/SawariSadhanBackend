@@ -450,6 +450,75 @@ class ViewVendor extends ViewRecord
                     })
                     ->visible(fn ($record) => $record->availabilities && $record->availabilities->count() > 0)
                     ->columnSpanFull(),
+                
+                Placeholder::make('heading_payouts')
+                    ->label('PAYOUT INFORMATION')
+                    ->content('')
+                    ->columnSpanFull(),
+                
+                Placeholder::make('payout_summary')
+                    ->label('Payout Summary')
+                    ->content(function ($record) {
+                        $completedCount = \App\Models\RenewalRequest::where('vendor_id', $record->id)
+                            ->where('status', 'completed')
+                            ->count();
+                        $perRequest = 250.0;
+                        $totalEarned = $completedCount * $perRequest;
+                        $totalPaid = (float) \App\Models\VendorPayout::where('vendor_id', $record->id)
+                            ->where('status', 'paid')
+                            ->sum('amount');
+                        $pending = max(0, $totalEarned - $totalPaid);
+                        
+                        $html = '<div style="background: #f9fafb; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb;">';
+                        $html .= '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">';
+                        $html .= '<div><strong>Completed Tasks:</strong><br><span style="font-size: 18px; color: #059669;">' . $completedCount . '</span></div>';
+                        $html .= '<div><strong>Total Earned:</strong><br><span style="font-size: 18px; color: #059669;">NPR ' . number_format($totalEarned, 2) . '</span></div>';
+                        $html .= '<div><strong>Total Paid:</strong><br><span style="font-size: 18px; color: #2563eb;">NPR ' . number_format($totalPaid, 2) . '</span></div>';
+                        $html .= '<div><strong>Pending Payout:</strong><br><span style="font-size: 18px; color: ' . ($pending > 0 ? '#dc2626' : '#059669') . ';">NPR ' . number_format($pending, 2) . '</span></div>';
+                        $html .= '</div></div>';
+                        return new \Illuminate\Support\HtmlString($html);
+                    })
+                    ->columnSpanFull(),
+                
+                Placeholder::make('paid_statements')
+                    ->label('Paid Statements')
+                    ->content(function ($record) {
+                        $paidPayouts = \App\Models\VendorPayout::where('vendor_id', $record->id)
+                            ->where('status', 'paid')
+                            ->orderByDesc('paid_at')
+                            ->get();
+                        
+                        if ($paidPayouts->isEmpty()) {
+                            return '<div style="padding: 15px; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; text-align: center; color: #6b7280;">No paid statements yet.</div>';
+                        }
+                        
+                        $html = '<div style="background: white; border-radius: 8px; border: 1px solid #e5e7eb; overflow: hidden;">';
+                        $html .= '<table style="width: 100%; border-collapse: collapse;">';
+                        $html .= '<thead><tr style="background: #f3f4f6;">';
+                        $html .= '<th style="padding: 12px; border-bottom: 2px solid #e5e7eb; text-align: left; font-weight: 600;">Date</th>';
+                        $html .= '<th style="padding: 12px; border-bottom: 2px solid #e5e7eb; text-align: right; font-weight: 600;">Amount</th>';
+                        $html .= '<th style="padding: 12px; border-bottom: 2px solid #e5e7eb; text-align: left; font-weight: 600;">Period</th>';
+                        $html .= '<th style="padding: 12px; border-bottom: 2px solid #e5e7eb; text-align: left; font-weight: 600;">Notes</th>';
+                        $html .= '</tr></thead><tbody>';
+                        
+                        foreach ($paidPayouts as $payout) {
+                            $paidDate = $payout->paid_at ? $payout->paid_at->format('Y-m-d') : 'N/A';
+                            $monthName = $payout->month ? date('F', mktime(0, 0, 0, $payout->month, 1)) : '—';
+                            $period = $monthName . ' ' . $payout->year;
+                            $notes = $payout->notes ? substr($payout->notes, 0, 50) . (strlen($payout->notes) > 50 ? '...' : '') : '—';
+                            
+                            $html .= '<tr style="border-bottom: 1px solid #e5e7eb;">';
+                            $html .= '<td style="padding: 12px; color: #059669; font-weight: 500;">' . htmlspecialchars($paidDate) . '</td>';
+                            $html .= '<td style="padding: 12px; text-align: right; font-weight: 600; color: #059669;">NPR ' . number_format((float) $payout->amount, 2) . '</td>';
+                            $html .= '<td style="padding: 12px; color: #6b7280;">' . htmlspecialchars($period) . '</td>';
+                            $html .= '<td style="padding: 12px; color: #6b7280; font-size: 13px;">' . htmlspecialchars($notes) . '</td>';
+                            $html .= '</tr>';
+                        }
+                        
+                        $html .= '</tbody></table></div>';
+                        return new \Illuminate\Support\HtmlString($html);
+                    })
+                    ->columnSpanFull(),
             ]);
     }
 }
