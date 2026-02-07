@@ -19,6 +19,7 @@ use App\Http\Controllers\VendorPayoutController;
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/verify-otp', [AuthController::class, 'verifyOtp']);
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/mobile-auth', [AuthController::class, 'login']); // same as login, for mobile apps
 
 Route::post('/resend-otp', [AuthController::class, 'resendOtp']);
 
